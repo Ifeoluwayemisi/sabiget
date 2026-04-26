@@ -1,0 +1,509 @@
+// SabiGet Database Schema
+// A location-aware, multi-vendor food marketplace for Nigeria
+// Documentation: See backend/README.md
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// AUTH & IDENTITY ENTITIES
+// ============================================
+
+model User {
+  id            String    @id @default(cuid())
+  phone         String    @unique
+  email         String?   @unique
+  name          String?
+  password      String?   // Null for OTP-only guests
+  role          Role      @default(GUEST)
+  
+  // Identity
+  isVerified    Boolean   @default(false)
+  verifiedAt    DateTime?
+  
+  // Loyalty Points
+  loyaltyPoints Int       @default(0) // In Naira equivalent
+  pointsEarned  Int       @default(0) // Total earned lifetime
+  pointsRedeemed Int      @default(0) // Total redeemed lifetime
+  orderCount    Int       @default(0) // For tier calculation
+  
+  // Profile
+  profileImage  String?
+  address       String?
+  lastLocation  String?   // LGA name (e.g., "Agege")
+  
+  // Timestamps
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  lastLoginAt   DateTime?
+  
+  // Relations
+  orders        Order[]
+  reviews       Review[]
+  disputeReports DisputeReport[]
+  auditLogs     AuditLog[]  @relation("AdminUser")
+  
+  @@index([phone])
+  @@index([role])
+}
+
+model Vendor {
+  id              String    @id @default(cuid())
+  name            String
+  description     String?
+  
+  // Location
+  latitude        Float
+  longitude       Float
+  lga             String    // Local Government Area (e.g., "Ikeja")
+  address         String?
+  serviceRadius   Float     @default(5.0) // km
+  
+  // Verification & Status
+  isVerified      Boolean   @default(false)
+  verifiedAt      DateTime?
+  isActive        Boolean   @default(true)
+  
+  // KYB Documents
+  kybStatus       KYBStatus @default(PENDING) // PENDING, VERIFIED, REJECTED
+  tinNumber       String?   @unique
+  cacNumber       String?   @unique
+  cacDocument     String?   // URL to document
+  ninNumber       String?
+  
+  // Contact
+  phone           String    @unique
+  email           String?   @unique
+  
+  // Payment
+  paystackSubcode String?   @unique // Paystack sub-account code
+  bankAccount     String?
+  bankCode        String?
+  
+  // Rating & Metrics
+  averageRating   Float     @default(0.0)
+  totalReviews    Int       @default(0)
+  
+  // Images
+  logo            String?
+  bannerImage     String?
+  
+  // Timestamps
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  // Relations
+  products        Product[]
+  orders          Order[]
+  metrics         VendorMetrics?
+  reviews         Review[]
+  
+  @@index([latitude, longitude])
+  @@index([lga])
+  @@index([isVerified])
+  @@index([isActive])
+}
+
+model Product {
+  id              String    @id @default(cuid())
+  vendorId        String
+  name            String
+  description     String?
+  price           Float     // In Naira
+  
+  imageUrl        String?
+  isAvailable     Boolean   @default(true)
+  preparationTime Int       @default(15) // minutes
+  
+  // Categorization
+  category        String?   // e.g., "Jollof Rice", "Soup"
+  tags            String[]  @default([])
+  
+  // Stock (Optional)
+  stockQuantity   Int?      // Null = unlimited
+  
+  // Timestamps
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  // Relations
+  vendor          Vendor    @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  orderItems      OrderItem[]
+  
+  @@index([vendorId])
+  @@index([isAvailable])
+}
+
+// ============================================
+// ORDER MANAGEMENT ENTITIES
+// ============================================
+
+model Order {
+  id              String    @id @default(cuid())
+  userId          String
+  vendorId        String
+  
+  // Status & Timing
+  status          OrderStatus @default(UNPAID)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  // State Timestamps
+  acceptedAt      DateTime?         // When vendor clicked "Accept"
+  preparedAt      DateTime?         // When vendor marked "Out for Delivery"
+  deliveredAt     DateTime?         // When DVC entered
+  completedAt     DateTime?         // When payout unlocked
+  cancelledAt     DateTime?
+  
+  // Payment & Pricing
+  foodCost        Float     // Sum of all items
+  serviceFee      Float     // Configuration-based
+  platformFee     Float     @default(0)
+  totalAmount     Float     // foodCost + serviceFee + platformFee
+  
+  // Payment Integration
+  paymentReference String?  @unique
+  paystackAccessCode String?
+  paymentGateway  String    @default("paystack") // extensible for future
+  
+  // Idempotency
+  idempotencyKey  String    @unique
+  
+  // DVC (Delivery Verification Code)
+  dvcCode         String?   // 6-char alphanumeric (e.g., "XJ42K9")
+  dvcAttempts     Int       @default(0)
+  dvcLockedUntil  DateTime? // Lockout after 3 wrong attempts
+  dvcEnteredAt    DateTime?
+  
+  // Delivery Details
+  deliveryAddress String
+  deliveryLat     Float
+  deliveryLng     Float
+  
+  // Auto-Kill Timer
+  acceptanceDeadline DateTime?  // 10 minutes after payment success
+  autoKilledAt    DateTime?     // When auto-kill triggered
+  
+  // Dispute & Refund
+  hasDispute      Boolean   @default(false)
+  disputeReason   String?
+  disputeResolvedAt DateTime?
+  refundInitiatedAt DateTime?
+  refundCompletedAt DateTime?
+  refundAmount    Float?
+  
+  // Admin Flags
+  preparingFlaggedAt DateTime? // When crossed 40-minute mark
+  preparingPingedAt DateTime?  // When admin sent "Ping" WhatsApp
+  forceRefundedByAdmin Boolean @default(false)
+  adminNotes      String?
+  
+  // Loyalty Points
+  pointsEarned    Int       @default(0)
+  pointsRedeemed  Int       @default(0)
+  
+  // Relations
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  vendor          Vendor    @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  items           OrderItem[]
+  webhookLogs     WebhookLog[]
+  reviews         Review[]
+  
+  @@index([userId])
+  @@index([vendorId])
+  @@index([status])
+  @@index([createdAt])
+  @@index([paymentReference])
+}
+
+model OrderItem {
+  id              String    @id @default(cuid())
+  orderId         String
+  productId       String
+  
+  quantity        Int
+  pricePerUnit    Float     // Price at time of order
+  totalPrice      Float     // quantity * pricePerUnit
+  
+  // Customization (Optional)
+  specialRequests String?   // e.g., "No spice", "Extra sauce"
+  
+  // Relations
+  order           Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product         Product   @relation(fields: [productId], references: [id], onDelete: Restrict)
+  
+  @@index([orderId])
+  @@index([productId])
+}
+
+// ============================================
+// RATINGS & REVIEWS
+// ============================================
+
+model Review {
+  id              String    @id @default(cuid())
+  orderId         String?
+  userId          String
+  vendorId        String
+  
+  rating          Int       // 1-5 stars
+  comment         String?
+  
+  // Aspects (separate ratings)
+  foodQuality     Int?      // 1-5
+  deliverySpeed   Int?      // 1-5
+  driverBehavior  Int?      // 1-5 (if applicable)
+  
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  // Relations
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  vendor          Vendor    @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  order           Order?    @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  
+  @@index([userId])
+  @@index([vendorId])
+  @@index([rating])
+}
+
+// ============================================
+// ANALYTICS & METRICS
+// ============================================
+
+model VendorMetrics {
+  id              String    @id @default(cuid())
+  vendorId        String    @unique
+  
+  // Acceptance Metrics
+  acceptanceRate  Float     @default(0.0) // % of accepted orders
+  totalAccepted   Int       @default(0)
+  totalRejected   Int       @default(0)
+  
+  // Preparation
+  avgPreparationTime Int    @default(0) // minutes
+  
+  // Cancellations
+  cancellationRate Float    @default(0.0) // % cancelled after accept
+  totalCancelled  Int       @default(0)
+  
+  // DVC Success
+  dvcSuccessRate  Float     @default(0.0) // % delivered with DVC
+  totalDvcSuccess Int       @default(0)
+  totalDvcFailed  Int       @default(0)
+  
+  // Customer Retention
+  customerRetention Float   @default(0.0) // % repeat customers
+  uniqueCustomers Int       @default(0)
+  repeatOrders    Int       @default(0)
+  
+  // Rankings (Meritocracy Engine)
+  meritScore      Float     @default(0.0) // Composite score
+  rank            Int?
+  
+  // Financials
+  totalOrderValue Float     @default(0.0)
+  totalPayout     Float     @default(0.0)
+  pendingPayout   Float     @default(0.0)
+  
+  updatedAt       DateTime  @default(now()) @updatedAt
+  
+  // Relations
+  vendor          Vendor    @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  
+  @@index([meritScore])
+  @@index([rank])
+}
+
+// ============================================
+// COMPLIANCE & AUDIT
+// ============================================
+
+model AuditLog {
+  id              String    @id @default(cuid())
+  adminId         String?
+  
+  action          String    // "VENDOR_DEACTIVATED", "REFUND_MANUAL", etc.
+  targetType      String    // "VENDOR", "ORDER", "USER"
+  targetId        String
+  
+  changes         Json?     // { before: {...}, after: {...} }
+  ipAddress       String?
+  userAgent       String?
+  reason          String?   // Why the action was taken
+  
+  createdAt       DateTime  @default(now())
+  
+  // Relations
+  admin           User?     @relation("AdminUser", fields: [adminId], references: [id], onDelete: SetNull)
+  
+  @@index([action])
+  @@index([targetType])
+  @@index([createdAt])
+}
+
+model DisputeReport {
+  id              String    @id @default(cuid())
+  orderId         String?
+  userId          String
+  
+  reportType      DisputeType // "FOOD_NOT_RECEIVED", "POOR_QUALITY", "DELIVERY_LATE", etc.
+  description     String
+  evidence        String?   // URL to image/video
+  
+  status          DisputeStatus @default(OPEN)
+  resolvedBy      String?   // Admin ID
+  resolution      String?
+  
+  createdAt       DateTime  @default(now())
+  resolvedAt      DateTime?
+  
+  // Relations
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@index([status])
+  @@index([createdAt])
+}
+
+// ============================================
+// SECURITY & RATE LIMITING
+// ============================================
+
+model OTPLog {
+  id              String    @id @default(cuid())
+  phone           String
+  
+  code            String    // Hashed OTP
+  attempts        Int       @default(0)
+  maxAttempts     Int       @default(3)
+  isUsed          Boolean   @default(false)
+  
+  createdAt       DateTime  @default(now())
+  expiresAt       DateTime
+  usedAt          DateTime?
+  
+  // Relations
+  @@index([phone, expiresAt])
+}
+
+model RateLimitLog {
+  id              String    @id @default(cuid())
+  key             String    // e.g., "otp:phone:+2348123456789", "checkout:ip:192.168.1.1"
+  
+  count           Int       @default(0)
+  maxLimit        Int
+  
+  createdAt       DateTime  @default(now())
+  expiresAt       DateTime
+  
+  @@index([key, expiresAt])
+}
+
+// ============================================
+// PAYMENT INTEGRATION
+// ============================================
+
+model WebhookLog {
+  id              String    @id @default(cuid())
+  orderId         String
+  
+  provider        String    // "paystack", "termii", etc.
+  event           String    // "charge.success", "payment.failed", etc.
+  payload         Json      // Full webhook data
+  
+  processed       Boolean   @default(false)
+  processedAt     DateTime?
+  error           String?   // If processing failed
+  
+  createdAt       DateTime  @default(now())
+  
+  // Relations
+  order           Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  
+  @@index([provider])
+  @@index([event])
+  @@index([processed])
+}
+
+model PaymentSettlement {
+  id              String    @id @default(cuid())
+  vendorId        String
+  
+  totalAmount     Float
+  settlementDate  DateTime  // T+1 date
+  
+  status          SettlementStatus @default(PENDING)
+  processedAt     DateTime?
+  transactionId   String?   // From Paystack
+  
+  createdAt       DateTime  @default(now())
+  
+  @@index([vendorId])
+  @@index([status])
+  @@index([settlementDate])
+}
+
+// ============================================
+// ENUMS
+// ============================================
+
+enum Role {
+  GUEST
+  MEMBER
+  VENDOR
+  ADMIN
+  SUPER_ADMIN
+}
+
+enum OrderStatus {
+  UNPAID                    // Awaiting payment
+  PENDING                   // Payment confirmed, waiting vendor accept
+  ACCEPTED                  // Vendor accepted
+  PREPARING                 // Vendor preparing food
+  OUT_FOR_DELIVERY          // Rider left with food
+  DELIVERED                 // DVC entered
+  COMPLETED                 // Payout unlocked
+  CANCELLED_CUSTOMER        // Customer cancelled (before vendor accept)
+  CANCELLED_VENDOR          // Vendor rejected
+  CANCELLED_AUTO_KILL       // Auto-kill timer expired
+  CANCELLED_ADMIN           // Admin cancelled
+  DISPUTED                  // Under investigation
+  REFUNDED                  // Money returned
+}
+
+enum KYBStatus {
+  PENDING                   // Awaiting verification
+  VERIFIED                  // Approved
+  REJECTED                  // Rejected
+  SUSPENDED                 // Suspended pending review
+}
+
+enum DisputeType {
+  FOOD_NOT_RECEIVED
+  POOR_FOOD_QUALITY
+  INCORRECT_ORDER
+  DELIVERY_LATE
+  WRONG_DELIVERY_ADDRESS
+  VENDOR_NO_SHOW
+  OTHER
+}
+
+enum DisputeStatus {
+  OPEN
+  UNDER_REVIEW
+  RESOLVED
+  ESCALATED
+}
+
+enum SettlementStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
