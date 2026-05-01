@@ -1,104 +1,77 @@
 // Auth Routes - OTP, Login, Token Refresh
 const express = require("express");
 const router = express.Router();
+const authController = require("../controllers/authController");
 const { otpLimiter, loginLimiter } = require("../middleware/rateLimiter");
 const { authenticateToken } = require("../middleware/auth");
 
 /**
- * POST /api/auth/send-otp
+ * POST /api/v1/auth/send-otp
  * Send OTP to user's phone (WhatsApp or SMS)
+ * Body: { phone: "+2348123456789" }
  */
-router.post("/send-otp", otpLimiter, async (req, res) => {
-  try {
-    const { phone } = req.body;
-
-    if (!phone) {
-      return res.status(400).json({ error: "Phone number required" });
-    }
-
-    // TODO: Implement OTP generation and sending via Termii
-    res.json({
-      message: "OTP sent to your phone",
-      phone,
-      info: "Implementation pending",
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
+router.post("/send-otp", otpLimiter, authController.sendOTP);
 
 /**
- * POST /api/auth/verify-otp
+ * POST /api/v1/auth/verify-otp
  * Verify OTP and issue JWT tokens
+ * Body: { phone: "+2348123456789", code: "482917" }
  */
-router.post("/verify-otp", loginLimiter, async (req, res) => {
-  try {
-    const { phone, otp } = req.body;
-
-    if (!phone || !otp) {
-      return res.status(400).json({ error: "Phone and OTP required" });
-    }
-
-    // TODO: Implement OTP verification and token generation
-    res.json({
-      message: "OTP verified",
-      phone,
-      info: "Implementation pending",
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
+router.post("/verify-otp", loginLimiter, authController.verifyOTP);
 
 /**
- * POST /api/auth/refresh-token
+ * POST /api/v1/auth/refresh-token
  * Get new access token using refresh token
+ * Body: { refreshToken: "eyJ..." }
  */
-router.post("/refresh-token", async (req, res) => {
-  try {
-    const refreshToken = req.cookies?.refreshToken;
-
-    if (!refreshToken) {
-      return res.status(401).json({ error: "No refresh token" });
-    }
-
-    // TODO: Implement token refresh logic
-    res.json({
-      message: "Token refreshed",
-      info: "Implementation pending",
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
+router.post("/refresh-token", authController.refreshAccessToken);
 
 /**
- * POST /api/auth/logout
- * Clear tokens
+ * POST /api/v1/auth/logout
+ * Clear tokens and revoke refresh token
+ * Headers: { Authorization: "Bearer accessToken" }
+ * Body: { refreshToken: "eyJ..." }
  */
-router.post("/logout", authenticateToken, async (req, res) => {
-  try {
-    res.clearCookie("accessToken");
-    res.clearCookie("refreshToken");
-    res.json({ message: "Logged out successfully" });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
+router.post("/logout", authenticateToken, authController.logout);
 
 /**
- * GET /api/auth/me
+ * GET /api/v1/auth/me
  * Get current authenticated user
+ * Headers: { Authorization: "Bearer accessToken" }
  */
 router.get("/me", authenticateToken, async (req, res) => {
   try {
-    // TODO: Fetch user details from database
-    res.json({
-      user: req.user,
-      info: "Implementation pending",
+    const prisma = global.prisma;
+    const user = await prisma.User.findUnique({
+      where: { id: req.user.id },
+      select: {
+        id: true,
+        phone: true,
+        email: true,
+        name: true,
+        role: true,
+        loyaltyPoints: true,
+        orderCount: true,
+        createdAt: true,
+      },
+    });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    return res.json({
+      success: true,
+      user,
     });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    return res.status(500).json({
+      success: false,
+      error: error.message,
+    });
   }
 });
 
