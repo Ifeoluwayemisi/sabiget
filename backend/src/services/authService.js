@@ -88,7 +88,7 @@ const sendOTPService = async (phone) => {
 const verifyOTPService = async (phone, code) => {
   try {
     // Find OTP record
-    const otpRecord = await prisma.OTPLog.findFirst({
+    const otpRecord = await getPrisma().OTPLog.findFirst({
       where: {
         phone,
         isUsed: false,
@@ -124,7 +124,7 @@ const verifyOTPService = async (phone, code) => {
     // Verify code (compare hashed)
     if (!verifyCode(code, otpRecord.code)) {
       // Increment attempts
-      await prisma.OTPLog.update({
+      await getPrisma().OTPLog.update({
         where: { id: otpRecord.id },
         data: { attempts: otpRecord.attempts + 1 },
       });
@@ -137,7 +137,7 @@ const verifyOTPService = async (phone, code) => {
     }
 
     // Mark OTP as used
-    await prisma.OTPLog.update({
+    await getPrisma().OTPLog.update({
       where: { id: otpRecord.id },
       data: {
         isUsed: true,
@@ -146,13 +146,13 @@ const verifyOTPService = async (phone, code) => {
     });
 
     // Find or create user (GUEST role)
-    let user = await prisma.User.findUnique({
+    let user = await getPrisma().User.findUnique({
       where: { phone },
     });
 
     if (!user) {
       console.log(`[OTP] Creating new GUEST user for ${phone}`);
-      user = await prisma.User.create({
+      user = await getPrisma().User.create({
         data: {
           phone,
           role: "GUEST",
@@ -163,7 +163,7 @@ const verifyOTPService = async (phone, code) => {
       });
     } else {
       // Update existing user
-      user = await prisma.User.update({
+      user = await getPrisma().User.update({
         where: { phone },
         data: {
           lastLoginAt: new Date(),
@@ -173,15 +173,6 @@ const verifyOTPService = async (phone, code) => {
 
     // Generate JWT tokens
     const { accessToken, refreshToken } = generateTokenPair(user);
-
-    // Save refresh token to database (optional, for tracking)
-    await prisma.RefreshToken.create({
-      data: {
-        token: refreshToken,
-        userId: user.id,
-        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
-      },
-    });
 
     console.log(`[OTP] ✓ User ${phone} verified successfully`);
 
