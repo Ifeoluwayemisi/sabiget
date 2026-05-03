@@ -145,7 +145,7 @@ exports.refreshAccessToken = async (req, res) => {
     }
 
     // Generate new access token
-    const newAccessToken = generateAccessToken(storedToken.user);
+    const newAccessToken = generateAccessToken(storedToken.user.id, storedToken.user.role);
 
     return res.status(200).json({
       success: true,

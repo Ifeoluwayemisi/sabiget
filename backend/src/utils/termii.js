@@ -17,38 +17,11 @@ const termiiApi = axios.create({
  * @returns {Promise<Object>} - Response from Termii
  */
 const sendWhatsAppOTP = async (data) => {
-  try {
-    const response = await termiiApi.post("/api/sms/otp/send", {
-      api_key: TERMII_API_KEY,
-      message_type: "ALPHANUMERIC",
-      to: data.phone, // Phone number in E.164 format (e.g., +2348123456789)
-      from: "SABIGET",
-      channel: "whatsapp",
-      pin_attempts: 1,
-      pin_time_to_live: 10, // 10 minutes
-      pin_length: 6,
-      pin_type: "NUMERIC",
-    });
-
-    if (response.data.code === "1" || response.data.pinId) {
-      return {
-        success: true,
-        pinId: response.data.pinId,
-        message: response.data.message,
-      };
-    } else {
-      return {
-        success: false,
-        error: response.data.message,
-      };
-    }
-  } catch (error) {
-    console.error("WhatsApp OTP send error:", error.message);
-    return {
-      success: false,
-      error: error.message,
-    };
-  }
+  const message = `Your SabiGet verification code is ${data.code}. It expires in 10 minutes.`;
+  return sendWhatsAppMessage({
+    phone: data.phone,
+    message,
+  });
 };
 
 /**
@@ -57,38 +30,11 @@ const sendWhatsAppOTP = async (data) => {
  * @returns {Promise<Object>} - Response from Termii
  */
 const sendSmsOTP = async (data) => {
-  try {
-    const response = await termiiApi.post("/api/sms/otp/send", {
-      api_key: TERMII_API_KEY,
-      message_type: "ALPHANUMERIC",
-      to: data.phone,
-      from: "SABIGET",
-      channel: "generic", // SMS channel
-      pin_attempts: 1,
-      pin_time_to_live: 10, // 10 minutes
-      pin_length: 6,
-      pin_type: "NUMERIC",
-    });
-
-    if (response.data.code === "1" || response.data.pinId) {
-      return {
-        success: true,
-        pinId: response.data.pinId,
-        message: response.data.message,
-      };
-    } else {
-      return {
-        success: false,
-        error: response.data.message,
-      };
-    }
-  } catch (error) {
-    console.error("SMS OTP send error:", error.message);
-    return {
-      success: false,
-      error: error.message,
-    };
-  }
+  const message = `Your SabiGet verification code is ${data.code}. It expires in 10 minutes.`;
+  return sendSmsMessage({
+    phone: data.phone,
+    message,
+  });
 };
 
 /**

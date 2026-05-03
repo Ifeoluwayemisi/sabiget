@@ -48,6 +48,8 @@ model User {
   reviews       Review[]
   disputeReports DisputeReport[]
   auditLogs     AuditLog[]  @relation("AdminUser")
+  refreshTokens RefreshToken[]
+  vendor        Vendor?
   
   @@index([phone])
   @@index([role])
@@ -99,6 +101,8 @@ model Vendor {
   updatedAt       DateTime  @updatedAt
   
   // Relations
+  userId          String    @unique
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   products        Product[]
   orders          Order[]
   metrics         VendorMetrics?
@@ -390,6 +394,19 @@ model OTPLog {
   
   // Relations
   @@index([phone, expiresAt])
+}
+
+model RefreshToken {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  revokedAt DateTime?
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([token])
 }
 
 model RateLimitLog {

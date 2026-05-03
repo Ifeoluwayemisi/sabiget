@@ -174,6 +174,15 @@ const verifyOTPService = async (phone, code) => {
     // Generate JWT tokens
     const { accessToken, refreshToken } = generateTokenPair(user);
 
+    // Save refresh token to database
+    await getPrisma().RefreshToken.create({
+      data: {
+        token: refreshToken,
+        userId: user.id,
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
+      },
+    });
+
     console.log(`[OTP] ✓ User ${phone} verified successfully`);
 
     return {
