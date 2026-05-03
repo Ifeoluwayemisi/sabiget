@@ -54,9 +54,20 @@ function decodeToken(token) {
   return jwt.decode(token);
 }
 
+/**
+ * Generate both access and refresh tokens in one call
+ */
+function generateTokenPair(user) {
+  return {
+    accessToken: generateAccessToken(user.id, user.role),
+    refreshToken: generateRefreshToken(user.id, user.role),
+  };
+}
+
 module.exports = {
   generateAccessToken,
   generateRefreshToken,
+  generateTokenPair,
   verifyAccessToken,
   verifyRefreshToken,
   decodeToken,

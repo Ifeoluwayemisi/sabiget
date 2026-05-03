@@ -2,14 +2,16 @@
 // Auth Service - Business Logic
 // ============================================
 
-const { generateOTP, hashOTP } = require("../utils/generators");
+const { generateOTP, hashCode, verifyCode } = require("../utils/generators");
 const {
   generateAccessToken,
   generateRefreshToken,
   generateTokenPair,
 } = require("../utils/jwt");
 const { sendWhatsAppOTP, sendSmsOTP, verifyOTP } = require("../utils/termii");
-const prisma = global.prisma;
+
+// Prisma will be available globally after app.js initializes
+const getPrisma = () => global.prisma;
 
 /**
  * Send OTP via WhatsApp (primary) or SMS (fallback)
@@ -18,10 +20,10 @@ const sendOTPService = async (phone) => {
   try {
     // Generate 6-digit OTP
     const otpCode = generateOTP(6);
-    const hashedOTP = hashOTP(otpCode);
+    const hashedOTP = hashCode(otpCode);
 
     // Store in database
-    const otpLog = await prisma.OTPLog.create({
+    const otpLog = await getPrisma().OTPLog.create({
       data: {
         phone,
         code: hashedOTP,
@@ -120,8 +122,7 @@ const verifyOTPService = async (phone, code) => {
     }
 
     // Verify code (compare hashed)
-    const codeHash = hashOTP(code);
-    if (codeHash !== otpRecord.code) {
+    if (!verifyCode(code, otpRecord.code)) {
       // Increment attempts
       await prisma.OTPLog.update({
         where: { id: otpRecord.id },
