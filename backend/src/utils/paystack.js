@@ -21,13 +21,22 @@ const paystackApi = axios.create({
  */
 const initializePayment = async (data) => {
   try {
-    const response = await paystackApi.post("/transaction/initialize", {
+    const payload = {
       email: data.email,
       amount: Math.round(data.amount * 100), // Convert to kobo
       reference: data.reference || generatePaystackReference(),
       callback_url: data.callbackUrl,
       metadata: data.metadata || {},
-    });
+    };
+
+    if (data.subaccount) {
+      payload.subaccount = data.subaccount;
+      if (data.transaction_charge !== undefined) {
+        payload.transaction_charge = Math.round(data.transaction_charge * 100); // Convert to kobo
+      }
+    }
+
+    const response = await paystackApi.post("/transaction/initialize", payload);
 
     if (response.data.status) {
       return {

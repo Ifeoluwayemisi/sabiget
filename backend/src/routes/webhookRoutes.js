@@ -67,23 +67,42 @@ async function handleChargeSuccess(data, res) {
   try {
     const { reference, customer, metadata, amount } = data;
 
-    console.log(
-      `[Webhook] Processing successful charge for reference: ${reference}`,
-    );
+    console.log(`[Webhook] Processing successful charge for reference: ${reference}`);
 
-    // TODO: Implement charge success logic
-    // 1. Find order by paymentReference (from metadata)
-    // 2. Start 10-minute auto-kill timer
-    // 3. Update order status: UNPAID → PENDING
-    // 4. Notify vendor via Socket.io with order details
-    // 5. Log webhook event in database
+    if (!metadata || !metadata.orderId) {
+       console.log(`[Webhook] No order metadata found for reference: ${reference}`);
+       return res.status(200).json({ success: true, message: "Ignored, no order metadata" });
+    }
 
-    // Example metadata structure:
-    // metadata = { orderId: "...", vendorId: "..." }
+    const orderId = metadata.orderId;
+
+    const order = await global.prisma.Order.findUnique({ where: { id: orderId } });
+    if (!order) {
+       console.log(`[Webhook] Order not found: ${orderId}`);
+       return res.status(200).json({ success: true, message: "Order not found" });
+    }
+
+    if (order.status !== "UNPAID") {
+       console.log(`[Webhook] Order ${orderId} already processed (Status: ${order.status})`);
+       return res.status(200).json({ success: true, message: "Already processed" });
+    }
+
+    // Set 10-minute acceptance deadline
+    const acceptanceDeadline = new Date(Date.now() + 10 * 60 * 1000);
+
+    await global.prisma.Order.update({
+      where: { id: orderId },
+      data: {
+        status: "PENDING",
+        acceptanceDeadline: acceptanceDeadline
+      }
+    });
+
+    // TODO: Notify vendor via Socket.io with order details
 
     return res.status(200).json({
       success: true,
-      message: "Payment verified and processed",
+      message: "Payment verified and order updated to PENDING",
     });
   } catch (error) {
     console.error("[Webhook] Charge success handler error:", error);

@@ -18,19 +18,30 @@ router.get("/nearby", optionalAuth, async (req, res) => {
     const { lat, lng, radius } = req.query;
 
     if (!lat || !lng) {
-      return res.status(400).json({ error: "Latitude and longitude required" });
+      return res.status(400).json({ success: false, error: "Latitude and longitude required" });
     }
 
-    // TODO: Implement geospatial query with PostGIS
+    const vendors = await global.prisma.Vendor.findMany({
+      where: { isActive: true },
+      include: {
+        metrics: true,
+      }
+    });
+
+    const parsedLat = parseFloat(lat);
+    const parsedLng = parseFloat(lng);
+    const parsedRadius = radius ? parseFloat(radius) : 5;
+
+    const { findNearbyVendors } = require("../utils/location");
+    const nearbyVendors = findNearbyVendors(vendors, parsedLat, parsedLng, parsedRadius);
+
     res.json({
-      message: "Nearby vendors fetched",
-      lat,
-      lng,
-      radius: radius || 5,
-      info: "Implementation pending",
+      success: true,
+      radius: parsedRadius,
+      vendors: nearbyVendors,
     });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
@@ -117,14 +128,21 @@ router.get("/:id", async (req, res) => {
   try {
     const { id } = req.params;
 
-    // TODO: Fetch vendor and products from database
-    res.json({
-      message: "Vendor details fetched",
-      vendorId: id,
-      info: "Implementation pending",
+    const vendor = await global.prisma.Vendor.findUnique({
+      where: { id },
+      include: {
+        products: {
+          where: { isAvailable: true }
+        },
+        metrics: true
+      }
     });
+
+    if (!vendor) return res.status(404).json({ success: false, error: "Vendor not found" });
+
+    res.json({ success: true, vendor });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
@@ -136,14 +154,13 @@ router.get("/:id/menu", async (req, res) => {
   try {
     const { id } = req.params;
 
-    // TODO: Fetch products for vendor
-    res.json({
-      message: "Vendor menu fetched",
-      vendorId: id,
-      info: "Implementation pending",
+    const products = await global.prisma.Product.findMany({
+      where: { vendorId: id, isAvailable: true }
     });
+
+    res.json({ success: true, menu: products });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
