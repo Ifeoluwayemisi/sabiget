@@ -24,6 +24,13 @@ router.post("/send-otp", otpLimiter, authController.sendOTP);
  */
 router.post("/verify-otp", loginLimiter, authController.verifyOTP);
 
+/**
+ * POST /api/v1/auth/login
+ * Login with email/phone and password
+ * Body: { phone: "+2348123456789", password: "mypassword" }
+ */
+router.post("/login", loginLimiter, authController.login);
+
 // ============================================
 // TOKEN MANAGEMENT
 // ============================================

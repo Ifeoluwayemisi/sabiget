@@ -105,7 +105,7 @@ router.get("/orders/:orderId", authenticateToken, async (req, res) => {
  */
 router.get("/loyalty-points", authenticateToken, async (req, res) => {
   try {
-    const userId = req.user.id;
+    const userId = req.user.userId;
 
     // TODO: Implement loyalty points balance
     // 1. Get user's current points balance
@@ -128,6 +128,8 @@ router.get("/loyalty-points", authenticateToken, async (req, res) => {
   }
 });
 
+const { hashPassword } = require("../utils/password");
+
 /**
  * POST /api/v1/customers/create-account
  * Convert GUEST to MEMBER (set password, email)
@@ -136,17 +138,33 @@ router.post("/create-account", authenticateToken, async (req, res) => {
   try {
     const { email, password, name } = req.body;
 
-    // TODO: Implement account creation
-    // 1. Validate email & password strength
-    // 2. Hash password
-    // 3. Update user: email, password, name, role: MEMBER
-    // 4. Return updated user data
+    if (!email || !password || !name) {
+      return res.status(400).json({ success: false, message: "Email, password, and name are required" });
+    }
+
+    const hashedPassword = await hashPassword(password);
+
+    const user = await global.prisma.User.update({
+      where: { id: req.user.userId },
+      data: {
+        email,
+        password: hashedPassword,
+        name,
+        role: "MEMBER",
+      },
+    });
+
+    user.password = undefined;
 
     return res.json({
       success: true,
       message: "Account created successfully",
+      user,
     });
   } catch (error) {
+    if (error.code === 'P2002' && error.meta?.target?.includes('email')) {
+        return res.status(400).json({ success: false, message: "Email already in use" });
+    }
     return res.status(500).json({
       success: false,
       error: error.message,
