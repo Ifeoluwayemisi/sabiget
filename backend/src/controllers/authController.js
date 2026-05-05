@@ -3,7 +3,7 @@
 // ============================================
 
 const { sendOTPService, verifyOTPService } = require("../services/authService");
-const { generateAccessToken, verifyRefreshToken } = require("../utils/jwt");
+const { generateTokenPair, generateAccessToken } = require("../utils/jwt");
 const prisma = global.prisma;
 
 /**
@@ -115,30 +115,40 @@ exports.refreshAccessToken = async (req, res) => {
       });
     }
 
-    // Verify refresh token (signature + expiry)
-    const decoded = verifyRefreshToken(refreshToken);
+    // Verify refresh token in database
+    const storedToken = await prisma.RefreshToken.findUnique({
+      where: { token: refreshToken },
+      include: { user: true },
+    });
 
-    if (!decoded) {
+    if (!storedToken) {
       return res.status(401).json({
         success: false,
         message: "Invalid refresh token",
       });
     }
 
-    // Verify user still exists
-    const user = await prisma.User.findUnique({
-      where: { id: decoded.userId },
-    });
-
-    if (!user) {
+    // Check if revoked
+    if (storedToken.revokedAt) {
       return res.status(401).json({
         success: false,
-        message: "User not found",
+        message: "Refresh token has been revoked",
+      });
+    }
+
+    // Check if expired
+    if (new Date() > new Date(storedToken.expiresAt)) {
+      return res.status(401).json({
+        success: false,
+        message: "Refresh token expired",
       });
     }
 
     // Generate new access token
-    const newAccessToken = generateAccessToken(user.id, user.role);
+    const newAccessToken = generateAccessToken(
+      storedToken.user.id,
+      storedToken.user.role,
+    );
 
     return res.status(200).json({
       success: true,
@@ -148,7 +158,7 @@ exports.refreshAccessToken = async (req, res) => {
     });
   } catch (error) {
     console.error("[Auth Controller] Refresh token error:", error);
-    return res.status(401).json({
+    return res.status(500).json({
       success: false,
       message: "Failed to refresh token",
       error: error.message,
@@ -163,7 +173,7 @@ exports.refreshAccessToken = async (req, res) => {
 exports.logout = async (req, res) => {
   try {
     const { refreshToken } = req.body;
-    const userId = req.user?.id; // Assuming user ID is added by auth middleware
+    const userId = req.user?.id;
 
     if (!userId) {
       return res.status(401).json({
@@ -194,77 +204,6 @@ exports.logout = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to logout",
-      error: error.message,
-    });
-  }
-};
-
-/**
- * POST /api/v1/auth/login
- * Password-based login (Email/Phone + Password)
- */
-const { verifyPassword } = require("../utils/password");
-exports.login = async (req, res) => {
-  try {
-    const { phone, email, password } = req.body;
-
-    if (!password || (!phone && !email)) {
-      return res.status(400).json({
-        success: false,
-        message: "Phone or Email, and password are required",
-      });
-    }
-
-    // Find user
-    const user = await prisma.User.findFirst({
-      where: phone ? { phone } : { email },
-    });
-
-    if (!user || !user.password) {
-      return res.status(401).json({
-        success: false,
-        message: "Invalid credentials",
-      });
-    }
-
-    // Verify password
-    const isValid = await verifyPassword(password, user.password);
-    if (!isValid) {
-      return res.status(401).json({
-        success: false,
-        message: "Invalid credentials",
-      });
-    }
-
-    // Generate JWT tokens
-    const { generateTokenPair } = require("../utils/jwt");
-    const { accessToken, refreshToken } = generateTokenPair(user);
-
-    // Save refresh token to database
-    await prisma.RefreshToken.create({
-      data: {
-        token: refreshToken,
-        userId: user.id,
-        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
-      },
-    });
-
-    user.password = undefined; // Don't send password hash
-    
-    return res.status(200).json({
-      success: true,
-      message: "Logged in successfully",
-      user,
-      accessToken,
-      refreshToken,
-      expiresIn: "15 minutes",
-      refreshExpiresIn: "7 days",
-    });
-  } catch (error) {
-    console.error("[Auth Controller] Login error:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Failed to login",
       error: error.message,
     });
   }

@@ -1,5 +1,5 @@
 // Utils for password hashing and verification
-const bcrypt = require("bcrypt");
+const bcrypt = require("bcryptjs");
 
 const SALT_ROUNDS = 10;
 

@@ -4,20 +4,30 @@
 
 const { hashPassword, verifyPassword } = require("../utils/password");
 const { generateTokenPair } = require("../utils/jwt");
-const { sendOTPService, verifyOTPService } = require("./authService");
 
 // Prisma will be available globally after app.js initializes
 const getPrisma = () => global.prisma;
 
 /**
- * Create Member Account - Convert GUEST to MEMBER
- * Guest user upgrades by setting password, email, and name
+ * Create member account (GUEST → MEMBER conversion)
+ * Requirements:
+ * - User must be GUEST (OTP verified)
+ * - Must provide strong password
+ * - Optional: name, email
  */
-const createAccountService = async (userId, email, name, password) => {
+const createMemberAccountService = async (
+  userId,
+  phone,
+  password,
+  name,
+  email,
+) => {
   try {
-    // Find user (must be GUEST role)
-    const user = await getPrisma().User.findUnique({
-      where: { id: userId },
+    const prisma = getPrisma();
+
+    // Find user by phone
+    const user = await prisma.User.findUnique({
+      where: { phone },
     });
 
     if (!user) {
@@ -27,44 +37,52 @@ const createAccountService = async (userId, email, name, password) => {
       };
     }
 
-    // Only allow GUEST users to upgrade
+    // Check if user is still GUEST
     if (user.role !== "GUEST") {
       return {
         success: false,
-        error: `User already has role ${user.role}. Can only upgrade from GUEST.`,
+        error: `User is already a ${user.role}, cannot create new account`,
       };
     }
 
-    // Check if email already exists
-    if (email) {
-      const existingEmail = await getPrisma().User.findUnique({
-        where: { email },
-      });
-
-      if (existingEmail && existingEmail.id !== userId) {
-        return {
-          success: false,
-          error: "Email already in use",
-        };
-      }
+    // Validate password strength
+    if (password.length < 8) {
+      return {
+        success: false,
+        error: "Password must be at least 8 characters",
+      };
     }
 
     // Hash password
     const hashedPassword = await hashPassword(password);
 
-    // Update user to MEMBER
-    const updatedUser = await getPrisma().User.update({
-      where: { id: userId },
+    // Update user to MEMBER with password
+    const updatedUser = await prisma.User.update({
+      where: { phone },
       data: {
-        email: email || null,
-        name: name || null,
         password: hashedPassword,
         role: "MEMBER",
+        name: name || user.name,
+        email: email || user.email,
+        isVerified: true,
+        verifiedAt: new Date(),
         updatedAt: new Date(),
       },
     });
 
-    console.log(`[Member Auth] User ${userId} upgraded to MEMBER`);
+    console.log(`[Member Auth] User ${phone} converted from GUEST to MEMBER`);
+
+    // Generate JWT tokens
+    const { accessToken, refreshToken } = generateTokenPair(updatedUser);
+
+    // Save refresh token to database
+    await prisma.RefreshToken.create({
+      data: {
+        token: refreshToken,
+        userId: updatedUser.id,
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
+      },
+    });
 
     return {
       success: true,
@@ -75,21 +93,35 @@ const createAccountService = async (userId, email, name, password) => {
         email: updatedUser.email,
         name: updatedUser.name,
         role: updatedUser.role,
+        loyaltyPoints: updatedUser.loyaltyPoints,
+      },
+      tokens: {
+        accessToken,
+        refreshToken,
       },
     };
   } catch (error) {
-    console.error("[Member Auth Service] Error creating account:", error.message);
+    console.error(
+      "[Member Auth Service] Error creating account:",
+      error.message,
+    );
     throw error;
   }
 };
 
 /**
- * Member Login - Phone + Password
+ * Login with phone and password (MEMBER only)
+ * Requirements:
+ * - User must be MEMBER
+ * - Phone number must be valid
+ * - Password must match hash
  */
-const memberLoginService = async (phone, password) => {
+const loginService = async (phone, password) => {
   try {
+    const prisma = getPrisma();
+
     // Find user by phone
-    const user = await getPrisma().User.findUnique({
+    const user = await prisma.User.findUnique({
       where: { phone },
     });
 
@@ -100,28 +132,25 @@ const memberLoginService = async (phone, password) => {
       };
     }
 
-    // Check if user is MEMBER (must have password)
+    // Check if user is MEMBER
     if (user.role !== "MEMBER") {
       return {
         success: false,
-        error: `User has role ${user.role}. Please use OTP login for guest/non-member users.`,
+        error: `User is not a MEMBER. Please verify identity first.`,
       };
     }
 
-    // Check if password is set
+    // Check if password exists
     if (!user.password) {
       return {
         success: false,
-        error: "Password not set. Please set password first or use OTP login.",
+        error: "Password not set for this account. Use OTP verification.",
       };
     }
 
     // Verify password
-    const passwordMatch = await verifyPassword(password, user.password);
-
-    if (!passwordMatch) {
-      // Log failed attempt (optional: implement rate limiting)
-      console.log(`[Member Auth] Failed login attempt for ${phone}`);
+    const isPasswordValid = await verifyPassword(password, user.password);
+    if (!isPasswordValid) {
       return {
         success: false,
         error: "Invalid phone or password",
@@ -129,19 +158,30 @@ const memberLoginService = async (phone, password) => {
     }
 
     // Update last login
-    await getPrisma().User.update({
+    await prisma.User.update({
       where: { phone },
-      data: { lastLoginAt: new Date() },
+      data: {
+        lastLoginAt: new Date(),
+      },
     });
 
     // Generate JWT tokens
     const { accessToken, refreshToken } = generateTokenPair(user);
 
-    console.log(`[Member Auth] ✓ User ${phone} logged in successfully`);
+    // Save refresh token to database
+    await prisma.RefreshToken.create({
+      data: {
+        token: refreshToken,
+        userId: user.id,
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
+      },
+    });
+
+    console.log(`[Member Auth] User ${phone} logged in successfully`);
 
     return {
       success: true,
-      message: "Logged in successfully",
+      message: "Login successful",
       user: {
         id: user.id,
         phone: user.phone,
@@ -156,169 +196,12 @@ const memberLoginService = async (phone, password) => {
       },
     };
   } catch (error) {
-    console.error("[Member Auth Service] Error during login:", error.message);
-    throw error;
-  }
-};
-
-/**
- * Change Password - Member changes their password
- */
-const changePasswordService = async (userId, oldPassword, newPassword) => {
-  try {
-    // Find user
-    const user = await getPrisma().User.findUnique({
-      where: { id: userId },
-    });
-
-    if (!user) {
-      return {
-        success: false,
-        error: "User not found",
-      };
-    }
-
-    // Verify old password
-    if (!user.password) {
-      return {
-        success: false,
-        error: "No password set. Cannot change password.",
-      };
-    }
-
-    const oldPasswordMatch = await verifyPassword(oldPassword, user.password);
-
-    if (!oldPasswordMatch) {
-      return {
-        success: false,
-        error: "Current password is incorrect",
-      };
-    }
-
-    // Hash new password
-    const hashedNewPassword = await hashPassword(newPassword);
-
-    // Update password
-    await getPrisma().User.update({
-      where: { id: userId },
-      data: {
-        password: hashedNewPassword,
-        updatedAt: new Date(),
-      },
-    });
-
-    console.log(`[Member Auth] ✓ User ${userId} changed password`);
-
-    return {
-      success: true,
-      message: "Password changed successfully",
-    };
-  } catch (error) {
-    console.error("[Member Auth Service] Error changing password:", error.message);
-    throw error;
-  }
-};
-
-/**
- * Forgot Password Flow - Reset via OTP
- * Step 1: Send OTP to phone (same as guest OTP)
- * Step 2: Verify OTP and set new password
- */
-const forgotPasswordInitiateService = async (phone) => {
-  try {
-    // Check if user exists
-    const user = await getPrisma().User.findUnique({
-      where: { phone },
-    });
-
-    if (!user) {
-      // Return same response for security (don't reveal if user exists)
-      return {
-        success: true,
-        message: "If account exists, OTP will be sent",
-        channel: "WHATSAPP",
-      };
-    }
-
-    // Send OTP using existing OTP service
-    const result = await sendOTPService(phone);
-
-    if (result.success) {
-      console.log(`[Member Auth] ✓ Password reset OTP sent to ${phone}`);
-      return {
-        success: true,
-        message: result.message,
-        channel: result.channel,
-        otpId: result.otpId,
-      };
-    } else {
-      return {
-        success: false,
-        error: result.error || "Failed to send OTP",
-      };
-    }
-  } catch (error) {
-    console.error("[Member Auth Service] Error in forgot password:", error.message);
-    throw error;
-  }
-};
-
-/**
- * Forgot Password Verify & Reset
- * Step 2: Verify OTP and set new password
- */
-const forgotPasswordResetService = async (phone, code, newPassword) => {
-  try {
-    // Verify OTP
-    const otpResult = await verifyOTPService(phone, code);
-
-    if (!otpResult.success) {
-      return {
-        success: false,
-        error: otpResult.error || "Invalid OTP",
-      };
-    }
-
-    // Find user
-    const user = await getPrisma().User.findUnique({
-      where: { phone },
-    });
-
-    if (!user) {
-      return {
-        success: false,
-        error: "User not found",
-      };
-    }
-
-    // Hash new password
-    const hashedPassword = await hashPassword(newPassword);
-
-    // Update password
-    await getPrisma().User.update({
-      where: { phone },
-      data: {
-        password: hashedPassword,
-        updatedAt: new Date(),
-      },
-    });
-
-    console.log(`[Member Auth] ✓ User ${phone} reset password successfully`);
-
-    return {
-      success: true,
-      message: "Password reset successfully. Please login with your new password.",
-    };
-  } catch (error) {
-    console.error("[Member Auth Service] Error resetting password:", error.message);
+    console.error("[Member Auth Service] Error logging in:", error.message);
     throw error;
   }
 };
 
 module.exports = {
-  createAccountService,
-  memberLoginService,
-  changePasswordService,
-  forgotPasswordInitiateService,
-  forgotPasswordResetService,
+  createMemberAccountService,
+  loginService,
 };

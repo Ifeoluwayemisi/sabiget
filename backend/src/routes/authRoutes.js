@@ -6,10 +6,6 @@ const memberAuthController = require("../controllers/memberAuthController");
 const { otpLimiter, loginLimiter } = require("../middleware/rateLimiter");
 const { authenticateToken } = require("../middleware/auth");
 
-// ============================================
-// GUEST/OTP AUTHENTICATION
-// ============================================
-
 /**
  * POST /api/v1/auth/send-otp
  * Send OTP to user's phone (WhatsApp or SMS)
@@ -25,15 +21,22 @@ router.post("/send-otp", otpLimiter, authController.sendOTP);
 router.post("/verify-otp", loginLimiter, authController.verifyOTP);
 
 /**
- * POST /api/v1/auth/login
- * Login with email/phone and password
- * Body: { phone: "+2348123456789", password: "mypassword" }
+ * POST /api/v1/auth/create-account
+ * Convert GUEST user to MEMBER with password
+ * Body: { phone: "+2348123456789", password: "securePass123", name: "John", email: "john@example.com" }
  */
-router.post("/login", loginLimiter, authController.login);
+router.post(
+  "/create-account",
+  loginLimiter,
+  memberAuthController.createAccount,
+);
 
-// ============================================
-// TOKEN MANAGEMENT
-// ============================================
+/**
+ * POST /api/v1/auth/login
+ * Login with phone and password (MEMBER only)
+ * Body: { phone: "+2348123456789", password: "securePass123" }
+ */
+router.post("/login", loginLimiter, memberAuthController.login);
 
 /**
  * POST /api/v1/auth/refresh-token
@@ -44,8 +47,9 @@ router.post("/refresh-token", authController.refreshAccessToken);
 
 /**
  * POST /api/v1/auth/logout
- * Logout user (client-side JWT discard)
+ * Clear tokens and revoke refresh token
  * Headers: { Authorization: "Bearer accessToken" }
+ * Body: { refreshToken: "eyJ..." }
  */
 router.post("/logout", authenticateToken, authController.logout);
 
@@ -89,46 +93,5 @@ router.get("/me", authenticateToken, async (req, res) => {
     });
   }
 });
-
-// ============================================
-// MEMBER AUTHENTICATION
-// ============================================
-
-/**
- * POST /api/v1/auth/member/create-account
- * Convert GUEST to MEMBER by setting password
- * Body: { email: "user@example.com", name: "John Doe", password: "securePass123" }
- * Headers: { Authorization: "Bearer accessToken" }
- */
-router.post("/member/create-account", authenticateToken, memberAuthController.createAccount);
-
-/**
- * POST /api/v1/auth/member/login
- * Member login with phone and password
- * Body: { phone: "+2348123456789", password: "securePass123" }
- */
-router.post("/member/login", loginLimiter, memberAuthController.memberLogin);
-
-/**
- * POST /api/v1/auth/member/change-password
- * Change password for authenticated member
- * Body: { oldPassword: "current123", newPassword: "newSecure456" }
- * Headers: { Authorization: "Bearer accessToken" }
- */
-router.post("/member/change-password", authenticateToken, memberAuthController.changePassword);
-
-/**
- * POST /api/v1/auth/member/forgot-password/initiate
- * Initiate password reset flow (send OTP)
- * Body: { phone: "+2348123456789" }
- */
-router.post("/member/forgot-password/initiate", otpLimiter, memberAuthController.forgotPasswordInitiate);
-
-/**
- * POST /api/v1/auth/member/forgot-password/reset
- * Complete password reset (verify OTP and set new password)
- * Body: { phone: "+2348123456789", code: "482917", newPassword: "newSecure456" }
- */
-router.post("/member/forgot-password/reset", loginLimiter, memberAuthController.forgotPasswordReset);
 
 module.exports = router;
