@@ -17,7 +17,10 @@ function authenticateToken(req, res, next) {
     return res.status(401).json({ error: "Invalid or expired token" });
   }
 
-  req.user = decoded;
+  req.user = {
+    ...decoded,
+    id: decoded.userId,
+  };
   next();
 }
 
@@ -51,7 +54,10 @@ function optionalAuth(req, res, next) {
   if (token) {
     const decoded = verifyAccessToken(token);
     if (decoded) {
-      req.user = decoded;
+      req.user = {
+        ...decoded,
+        id: decoded.userId,
+      };
     }
   }
 

@@ -22,11 +22,13 @@ router.post("/verify-otp", loginLimiter, authController.verifyOTP);
 
 /**
  * POST /api/v1/auth/create-account
- * Convert GUEST user to MEMBER with password
- * Body: { phone: "+2348123456789", password: "securePass123", name: "John", email: "john@example.com" }
+ * Convert authenticated GUEST user to MEMBER with password
+ * Headers: { Authorization: "Bearer accessToken" }
+ * Body: { password: "securePass123", name: "John", email: "john@example.com" }
  */
 router.post(
   "/create-account",
+  authenticateToken,
   loginLimiter,
   memberAuthController.createAccount,
 );

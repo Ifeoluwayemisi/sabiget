@@ -61,8 +61,8 @@ backend/
 │   │   ├── customerRoutes.js  # Customer search, orders, loyalty
 │   │   ├── adminRoutes.js     # Admin dashboard, vendor approval, refunds
 │   │   └── webhookRoutes.js   # Paystack webhooks
-│   ├── controllers/           # Business logic (to be implemented)
-│   ├── services/              # Service layer (to be implemented)
+│   ├── controllers/           # Route handlers for auth and core flows
+│   ├── services/              # Auth/business logic services
 │   └── utils/
 │       ├── jwt.js             # Token generation & verification
 │       ├── paystack.js        # Paystack API integration
@@ -149,6 +149,9 @@ ACCEPTED → PREPARING → OUT_FOR_DELIVERY → DELIVERED (DVC entered) → COMP
 
 - `POST /api/v1/auth/send-otp` - Send OTP via WhatsApp/SMS
 - `POST /api/v1/auth/verify-otp` - Verify OTP, get JWT tokens
+- `POST /api/v1/auth/create-account` - Convert authenticated GUEST to MEMBER
+- `POST /api/v1/auth/login` - Login with phone + password
+- `GET /api/v1/auth/me` - Get current authenticated user
 - `POST /api/v1/auth/refresh-token` - Get new access token
 - `POST /api/v1/auth/logout` - Logout
 
@@ -269,9 +272,9 @@ FRONTEND_URL=https://sabiget.vercel.app
 
 ### Phase 1: Core Auth (Week 1)
 
-- [ ] Implement OTP logic (Termii integration)
-- [ ] JWT token generation & refresh
-- [ ] User creation (GUEST signup)
+- [x] Implement OTP logic (Termii integration)
+- [x] JWT token generation & refresh
+- [x] User creation (GUEST signup)
 - [ ] Rate limiting tests
 
 ### Phase 2: Payments (Week 2)
@@ -364,5 +367,5 @@ psql -U postgres -h localhost
 
 ---
 
-**Last Updated**: April 26, 2026
-**Status**: Backend scaffolding complete, feature implementation in progress
+**Last Updated**: May 10, 2026
+**Status**: Core auth is implemented, payments/orders are partially implemented, and customer/admin flows are still in progress

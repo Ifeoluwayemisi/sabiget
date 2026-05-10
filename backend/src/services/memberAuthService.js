@@ -15,19 +15,19 @@ const getPrisma = () => global.prisma;
  * - Must provide strong password
  * - Optional: name, email
  */
-const createMemberAccountService = async (
+const createMemberAccountService = async ({
   userId,
   phone,
   password,
   name,
   email,
-) => {
+}) => {
   try {
     const prisma = getPrisma();
 
-    // Find user by phone
+    const lookup = userId ? { id: userId } : { phone };
     const user = await prisma.User.findUnique({
-      where: { phone },
+      where: lookup,
     });
 
     if (!user) {
@@ -43,6 +43,19 @@ const createMemberAccountService = async (
         success: false,
         error: `User is already a ${user.role}, cannot create new account`,
       };
+    }
+
+    if (email) {
+      const existingEmail = await prisma.User.findUnique({
+        where: { email },
+      });
+
+      if (existingEmail && existingEmail.id !== user.id) {
+        return {
+          success: false,
+          error: "Email already in use",
+        };
+      }
     }
 
     // Validate password strength
@@ -70,7 +83,9 @@ const createMemberAccountService = async (
       },
     });
 
-    console.log(`[Member Auth] User ${phone} converted from GUEST to MEMBER`);
+    console.log(
+      `[Member Auth] User ${user.phone} converted from GUEST to MEMBER`,
+    );
 
     // Generate JWT tokens
     const { accessToken, refreshToken } = generateTokenPair(updatedUser);

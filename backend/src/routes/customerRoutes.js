@@ -5,6 +5,7 @@
 const express = require("express");
 const router = express.Router();
 const { authenticateToken, optionalAuth } = require("../middleware/auth");
+const { createMemberAccountService } = require("../services/memberAuthService");
 
 /**
  * GET /api/v1/customers/nearby-vendors
@@ -128,8 +129,6 @@ router.get("/loyalty-points", authenticateToken, async (req, res) => {
   }
 });
 
-const { hashPassword } = require("../utils/password");
-
 /**
  * POST /api/v1/customers/create-account
  * Convert GUEST to MEMBER (set password, email)
@@ -138,33 +137,30 @@ router.post("/create-account", authenticateToken, async (req, res) => {
   try {
     const { email, password, name } = req.body;
 
-    if (!email || !password || !name) {
-      return res.status(400).json({ success: false, message: "Email, password, and name are required" });
-    }
-
-    const hashedPassword = await hashPassword(password);
-
-    const user = await global.prisma.User.update({
-      where: { id: req.user.userId },
-      data: {
-        email,
-        password: hashedPassword,
-        name,
-        role: "MEMBER",
-      },
+    const result = await createMemberAccountService({
+      userId: req.user.userId,
+      password,
+      name,
+      email,
     });
 
-    user.password = undefined;
+    if (!result.success) {
+      return res.status(400).json({
+        success: false,
+        message: result.error,
+      });
+    }
 
     return res.json({
       success: true,
-      message: "Account created successfully",
-      user,
+      message: result.message,
+      user: result.user,
+      accessToken: result.tokens.accessToken,
+      refreshToken: result.tokens.refreshToken,
+      expiresIn: "15 minutes",
+      refreshExpiresIn: "7 days",
     });
   } catch (error) {
-    if (error.code === 'P2002' && error.meta?.target?.includes('email')) {
-        return res.status(400).json({ success: false, message: "Email already in use" });
-    }
     return res.status(500).json({
       success: false,
       error: error.message,

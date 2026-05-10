@@ -6,16 +6,73 @@ const express = require("express");
 const router = express.Router();
 const { verifyWebhookSignature } = require("../utils/paystack");
 
-/**
- * POST /api/v1/webhooks/paystack
- * Handle Paystack payment webhooks
- * This is called by Paystack when payment status changes
- */
+const ACCEPTANCE_WINDOW_MS = 10 * 60 * 1000;
+
+function getWebhookOrderId(payload) {
+  return payload?.metadata?.orderId || null;
+}
+
+async function createWebhookLog({ orderId, event, payload }) {
+  if (!orderId) {
+    return null;
+  }
+
+  return global.prisma.WebhookLog.create({
+    data: {
+      orderId,
+      provider: "paystack",
+      event,
+      payload,
+    },
+  });
+}
+
+async function updateWebhookLog(logId, data) {
+  if (!logId) {
+    return;
+  }
+
+  await global.prisma.WebhookLog.update({
+    where: { id: logId },
+    data,
+  });
+}
+
+function buildVendorNotification(order) {
+  return {
+    orderId: order.id,
+    vendorId: order.vendorId,
+    status: order.status,
+    totalAmount: order.totalAmount,
+    deliveryAddress: order.deliveryAddress,
+    acceptanceDeadline: order.acceptanceDeadline,
+    customer: order.user
+      ? {
+          id: order.user.id,
+          name: order.user.name,
+          phone: order.user.phone,
+        }
+      : null,
+    items: order.items?.map((item) => ({
+      id: item.id,
+      quantity: item.quantity,
+      totalPrice: item.totalPrice,
+      product: item.product
+        ? {
+            id: item.product.id,
+            name: item.product.name,
+          }
+        : null,
+    })),
+  };
+}
+
 router.post("/paystack", async (req, res) => {
+  let webhookLogId = null;
+
   try {
-    // Verify webhook signature for security
     const signature = req.headers["x-paystack-signature"];
-    const rawBody = JSON.stringify(req.body);
+    const rawBody = req.rawBody || JSON.stringify(req.body);
 
     if (!verifyWebhookSignature(rawBody, signature)) {
       console.warn("[Webhook] Invalid signature detected");
@@ -27,32 +84,56 @@ router.post("/paystack", async (req, res) => {
 
     const { event, data } = req.body;
 
+    webhookLogId = (
+      await createWebhookLog({
+        orderId: getWebhookOrderId(data),
+        event,
+        payload: req.body,
+      })
+    )?.id;
+
     console.log(`[Webhook] Received event: ${event}`);
 
-    // Handle different Paystack events
     switch (event) {
       case "charge.success":
-        return handleChargeSuccess(data, res);
+        await handleChargeSuccess(data);
+        break;
 
       case "charge.failed":
-        return handleChargeFailed(data, res);
+        await handleChargeFailed(data);
+        break;
 
       case "transfer.success":
-        return handleTransferSuccess(data, res);
+        await handleTransferSuccess(data);
+        break;
 
       case "transfer.failed":
-        return handleTransferFailed(data, res);
+        await handleTransferFailed(data);
+        break;
 
       default:
         console.log(`[Webhook] Unhandled event: ${event}`);
-        return res.status(200).json({
-          success: true,
-          message: "Webhook received (event not processed)",
-        });
+        break;
     }
+
+    await updateWebhookLog(webhookLogId, {
+      processed: true,
+      processedAt: new Date(),
+      error: null,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Webhook received",
+    });
   } catch (error) {
     console.error("[Webhook] Error processing webhook:", error);
-    // Always return 200 to Paystack to confirm receipt
+
+    await updateWebhookLog(webhookLogId, {
+      processed: false,
+      error: error.message,
+    });
+
     return res.status(200).json({
       success: false,
       error: error.message,
@@ -60,147 +141,135 @@ router.post("/paystack", async (req, res) => {
   }
 });
 
-/**
- * Handle successful payment (charge.success)
- */
-async function handleChargeSuccess(data, res) {
-  try {
-    const { reference, customer, metadata, amount } = data;
+async function handleChargeSuccess(data) {
+  const { reference, metadata, amount } = data;
 
-    console.log(`[Webhook] Processing successful charge for reference: ${reference}`);
+  console.log(
+    `[Webhook] Processing successful charge for reference: ${reference}`,
+  );
 
-    if (!metadata || !metadata.orderId) {
-       console.log(`[Webhook] No order metadata found for reference: ${reference}`);
-       return res.status(200).json({ success: true, message: "Ignored, no order metadata" });
-    }
-
-    const orderId = metadata.orderId;
-
-    const order = await global.prisma.Order.findUnique({ where: { id: orderId } });
-    if (!order) {
-       console.log(`[Webhook] Order not found: ${orderId}`);
-       return res.status(200).json({ success: true, message: "Order not found" });
-    }
-
-    if (order.status !== "UNPAID") {
-       console.log(`[Webhook] Order ${orderId} already processed (Status: ${order.status})`);
-       return res.status(200).json({ success: true, message: "Already processed" });
-    }
-
-    // Set 10-minute acceptance deadline
-    const acceptanceDeadline = new Date(Date.now() + 10 * 60 * 1000);
-
-    await global.prisma.Order.update({
-      where: { id: orderId },
-      data: {
-        status: "PENDING",
-        acceptanceDeadline: acceptanceDeadline
-      }
-    });
-
-    // TODO: Notify vendor via Socket.io with order details
-
-    return res.status(200).json({
-      success: true,
-      message: "Payment verified and order updated to PENDING",
-    });
-  } catch (error) {
-    console.error("[Webhook] Charge success handler error:", error);
-    return res.status(200).json({
-      success: false,
-      message: "Error processing charge success",
-    });
+  if (!metadata?.orderId) {
+    console.log(`[Webhook] No order metadata found for reference: ${reference}`);
+    return;
   }
-}
 
-/**
- * Handle failed payment (charge.failed)
- */
-async function handleChargeFailed(data, res) {
-  try {
-    const { reference, customer, metadata } = data;
+  const order = await global.prisma.Order.findUnique({
+    where: { id: metadata.orderId },
+    include: {
+      user: {
+        select: { id: true, name: true, phone: true },
+      },
+      items: {
+        include: {
+          product: {
+            select: { id: true, name: true },
+          },
+        },
+      },
+    },
+  });
 
-    console.log(
-      `[Webhook] Processing failed charge for reference: ${reference}`,
+  if (!order) {
+    console.log(`[Webhook] Order not found: ${metadata.orderId}`);
+    return;
+  }
+
+  if (order.paymentReference !== reference) {
+    throw new Error(
+      `Payment reference mismatch for order ${order.id}: expected ${order.paymentReference}, received ${reference}`,
     );
-
-    // TODO: Implement charge failed logic
-    // 1. Find order by reference
-    // 2. Update order status: UNPAID → FAILED or CANCELLED
-    // 3. Send notification to user: "Payment failed. Please try again."
-    // 4. Log webhook event
-
-    return res.status(200).json({
-      success: true,
-      message: "Failed payment processed",
-    });
-  } catch (error) {
-    console.error("[Webhook] Charge failed handler error:", error);
-    return res.status(200).json({
-      success: false,
-      message: "Error processing charge failure",
-    });
   }
-}
 
-/**
- * Handle successful transfer (transfer.success) - T+1 vendor payout
- */
-async function handleTransferSuccess(data, res) {
-  try {
-    const { reference, recipient, amount } = data;
-
-    console.log(`[Webhook] Processing successful transfer: ${reference}`);
-
-    // TODO: Implement transfer success logic
-    // 1. Find PaymentSettlement by transactionId
-    // 2. Update settlement status: PENDING → COMPLETED
-    // 3. Update vendor balance
-    // 4. Log transaction in AuditLog
-    // 5. Send notification to vendor: "Payment received!"
-
-    return res.status(200).json({
-      success: true,
-      message: "Transfer verified",
-    });
-  } catch (error) {
-    console.error("[Webhook] Transfer success handler error:", error);
-    return res.status(200).json({
-      success: false,
-      message: "Error processing transfer success",
-    });
-  }
-}
-
-/**
- * Handle failed transfer (transfer.failed) - T+1 vendor payout failure
- */
-async function handleTransferFailed(data, res) {
-  try {
-    const { reference, recipient, reason } = data;
-
-    console.log(
-      `[Webhook] Processing failed transfer: ${reference}, Reason: ${reason}`,
+  if (Math.round(order.totalAmount * 100) !== amount) {
+    throw new Error(
+      `Payment amount mismatch for order ${order.id}: expected ${Math.round(order.totalAmount * 100)}, received ${amount}`,
     );
-
-    // TODO: Implement transfer failed logic
-    // 1. Find PaymentSettlement
-    // 2. Update status: PROCESSING → FAILED
-    // 3. Log failure reason
-    // 4. Alert admin: "Vendor payout failed - manual intervention needed"
-    // 5. Retry mechanism or manual review
-
-    return res.status(200).json({
-      success: true,
-      message: "Failed transfer processed",
-    });
-  } catch (error) {
-    console.error("[Webhook] Transfer failed handler error:", error);
-    return res.status(200).json({
-      success: false,
-      message: "Error processing transfer failure",
-    });
   }
+
+  if (order.status !== "UNPAID") {
+    console.log(
+      `[Webhook] Order ${order.id} already processed (status: ${order.status})`,
+    );
+    return;
+  }
+
+  const updatedOrder = await global.prisma.Order.update({
+    where: { id: order.id },
+    data: {
+      status: "PENDING",
+      acceptanceDeadline: new Date(Date.now() + ACCEPTANCE_WINDOW_MS),
+    },
+    include: {
+      user: {
+        select: { id: true, name: true, phone: true },
+      },
+      items: {
+        include: {
+          product: {
+            select: { id: true, name: true },
+          },
+        },
+      },
+    },
+  });
+
+  global.io
+    ?.to(`vendor:${updatedOrder.vendorId}`)
+    .emit("order:new", buildVendorNotification(updatedOrder));
+}
+
+async function handleChargeFailed(data) {
+  const { reference, metadata } = data;
+
+  console.log(`[Webhook] Processing failed charge for reference: ${reference}`);
+
+  if (!metadata?.orderId) {
+    console.log(`[Webhook] No order metadata found for failed charge: ${reference}`);
+    return;
+  }
+
+  const order = await global.prisma.Order.findUnique({
+    where: { id: metadata.orderId },
+  });
+
+  if (!order) {
+    console.log(`[Webhook] Order not found for failed charge: ${metadata.orderId}`);
+    return;
+  }
+
+  if (order.paymentReference !== reference) {
+    throw new Error(
+      `Failed-charge reference mismatch for order ${order.id}: expected ${order.paymentReference}, received ${reference}`,
+    );
+  }
+
+  if (order.status !== "UNPAID") {
+    console.log(
+      `[Webhook] Failed charge ignored because order ${order.id} is already ${order.status}`,
+    );
+    return;
+  }
+
+  await global.prisma.Order.update({
+    where: { id: order.id },
+    data: {
+      status: "CANCELLED_CUSTOMER",
+      cancelledAt: new Date(),
+      adminNotes: "Payment failed before order confirmation",
+    },
+  });
+}
+
+async function handleTransferSuccess(data) {
+  const { reference } = data;
+  console.log(`[Webhook] Processing successful transfer: ${reference}`);
+}
+
+async function handleTransferFailed(data) {
+  const { reference, reason } = data;
+  console.log(
+    `[Webhook] Processing failed transfer: ${reference}, Reason: ${reason}`,
+  );
 }
 
 module.exports = router;

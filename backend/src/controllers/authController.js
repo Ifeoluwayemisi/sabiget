@@ -3,8 +3,9 @@
 // ============================================
 
 const { sendOTPService, verifyOTPService } = require("../services/authService");
-const { generateTokenPair, generateAccessToken } = require("../utils/jwt");
-const prisma = global.prisma;
+const { generateAccessToken, verifyRefreshToken } = require("../utils/jwt");
+
+const getPrisma = () => global.prisma;
 
 /**
  * POST /api/v1/auth/send-otp
@@ -115,8 +116,16 @@ exports.refreshAccessToken = async (req, res) => {
       });
     }
 
+    const decoded = verifyRefreshToken(refreshToken);
+    if (!decoded) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid refresh token",
+      });
+    }
+
     // Verify refresh token in database
-    const storedToken = await prisma.RefreshToken.findUnique({
+    const storedToken = await getPrisma().RefreshToken.findUnique({
       where: { token: refreshToken },
       include: { user: true },
     });
@@ -125,6 +134,13 @@ exports.refreshAccessToken = async (req, res) => {
       return res.status(401).json({
         success: false,
         message: "Invalid refresh token",
+      });
+    }
+
+    if (storedToken.userId !== decoded.userId) {
+      return res.status(401).json({
+        success: false,
+        message: "Refresh token user mismatch",
       });
     }
 
@@ -173,7 +189,7 @@ exports.refreshAccessToken = async (req, res) => {
 exports.logout = async (req, res) => {
   try {
     const { refreshToken } = req.body;
-    const userId = req.user?.id;
+    const userId = req.user?.userId;
 
     if (!userId) {
       return res.status(401).json({
@@ -184,10 +200,20 @@ exports.logout = async (req, res) => {
 
     if (refreshToken) {
       // Revoke refresh token
-      await prisma.RefreshToken.updateMany({
+      await getPrisma().RefreshToken.updateMany({
         where: {
           token: refreshToken,
           userId,
+        },
+        data: {
+          revokedAt: new Date(),
+        },
+      });
+    } else {
+      await getPrisma().RefreshToken.updateMany({
+        where: {
+          userId,
+          revokedAt: null,
         },
         data: {
           revokedAt: new Date(),

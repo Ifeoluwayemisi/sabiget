@@ -9,36 +9,25 @@ const {
 
 /**
  * POST /api/v1/auth/create-account
- * Convert GUEST user to MEMBER by setting password
- * Body: { phone: "+2348123456789", password: "securePassword", name: "John Doe", email: "john@example.com" }
+ * Convert authenticated GUEST user to MEMBER by setting password
+ * Body: { password: "securePassword", name: "John Doe", email: "john@example.com" }
  */
 exports.createAccount = async (req, res) => {
   try {
-    const { phone, password, name, email } = req.body;
+    const { password, name, email } = req.body;
+    const userId = req.user?.userId;
 
-    // Validate required fields
-    if (!phone || !password) {
+    if (!password) {
       return res.status(400).json({
         success: false,
-        message: "Phone and password are required",
+        message: "Password is required",
       });
     }
 
-    // Validate phone format
-    const phoneRegex = /^(\+234|0)[789]\d{9}$/;
-    if (!phoneRegex.test(phone)) {
+    if (!userId) {
       return res.status(400).json({
         success: false,
-        message: "Invalid Nigerian phone number",
-        example: "+2348123456789",
-      });
-    }
-
-    // Validate password strength
-    if (password.length < 8) {
-      return res.status(400).json({
-        success: false,
-        message: "Password must be at least 8 characters",
+        message: "Authenticated user is required",
       });
     }
 
@@ -54,13 +43,12 @@ exports.createAccount = async (req, res) => {
     }
 
     // Create account
-    const result = await createMemberAccountService(
-      null, // userId not needed, phone lookup
-      phone,
+    const result = await createMemberAccountService({
+      userId,
       password,
       name,
       email,
-    );
+    });
 
     if (!result.success) {
       return res.status(400).json(result);
