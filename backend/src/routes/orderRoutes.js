@@ -10,13 +10,13 @@ const {
   completeDeliveredOrder,
   triggerOrderRefund,
 } = require("../services/orderService");
-const crypto = require("crypto");
+const { generateDVC, generateIdempotencyKey } = require("../utils/generators");
 
 function getIdempotencyKey(req) {
   return (
     req.headers["x-idempotency-key"] ||
     req.body?.idempotencyKey ||
-    crypto.randomUUID()
+    generateIdempotencyKey()
   );
 }
 
@@ -113,9 +113,7 @@ router.post("/", checkoutLimiter, authenticateToken, async (req, res) => {
     const serviceFee = 500;
     const platformFee = 0;
     const totalAmount = foodCost + serviceFee + platformFee;
-    const paymentReference = `SG-ORD-${Date.now()}-${crypto.randomBytes(4)
-      .toString("hex")
-      .toUpperCase()}`;
+    const paymentReference = `SG-ORD-${Date.now()}-${generateIdempotencyKey()}`;
 
     const order = await global.prisma.Order.create({
       data: {
@@ -335,7 +333,7 @@ router.post(
         });
       }
 
-      const dvcCode = crypto.randomBytes(3).toString("hex").toUpperCase();
+      const dvcCode = generateDVC();
 
       await global.prisma.Order.update({
         where: { id },
