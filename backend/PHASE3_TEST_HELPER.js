@@ -14,8 +14,9 @@
  *   USER_ID=user_123
  */
 
-const http = require("http");
-const querystring = require("querystring");
+import http from "http";
+import https from "https";
+import { URL } from "url";
 
 const API_URL = process.env.API_URL || "http://localhost:5000";
 const ACCESS_TOKEN = process.env.ACCESS_TOKEN;
@@ -54,8 +55,7 @@ function request(method, path, body = null) {
       options.headers["Content-Length"] = Buffer.byteLength(bodyStr);
     }
 
-    const urlObj = new URL(url);
-    const httpMethod = urlObj.protocol === "https:" ? require("https") : http;
+    const httpMethod = url.protocol === "https:" ? https : http;
 
     const req = httpMethod.request(url, options, (res) => {
       let data = "";

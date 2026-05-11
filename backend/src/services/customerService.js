@@ -70,10 +70,10 @@ const redeemLoyaltyPoints = async (userId, pointsToRedeem) => {
       };
     }
 
-    if (pointsToRedeem < 50) {
+    if (pointsToRedeem < 100) {
       return {
         success: false,
-        error: "Minimum 50 points required for redemption",
+        error: "Minimum 100 points required for redemption",
       };
     }
 
