@@ -11,7 +11,9 @@ const {
   triggerOrderRefund,
 } = require("../services/orderService");
 const { generateDVC, generateIdempotencyKey } = require("../utils/generators");
-const { updateLoyaltyPointsOnOrderCompletion } = require("../services/customerService");
+const {
+  updateLoyaltyPointsOnOrderCompletion,
+} = require("../services/customerService");
 
 function getIdempotencyKey(req) {
   return (

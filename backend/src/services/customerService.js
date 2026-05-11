@@ -105,7 +105,7 @@ const redeemLoyaltyPoints = async (userId, pointsToRedeem) => {
 
     return {
       success: true,
-      message: `Redeemed ${pointsToRedeem} points for ₦${discountAmount/100} discount`,
+      message: `Redeemed ${pointsToRedeem} points for ₦${discountAmount / 100} discount`,
       pointsRedeemed: pointsToRedeem,
       discountNaira: discountAmount / 100,
       remainingPoints: updatedUser.loyaltyPoints,
@@ -163,13 +163,11 @@ const getCustomerInsights = async (userId) => {
     // Find most frequently ordered vendor
     const vendorCounts = {};
     user.orders.forEach((order) => {
-      vendorCounts[order.vendorId] =
-        (vendorCounts[order.vendorId] || 0) + 1;
+      vendorCounts[order.vendorId] = (vendorCounts[order.vendorId] || 0) + 1;
     });
 
-    const favoriteVendorId = Object.entries(vendorCounts).sort(
-      (a, b) => b[1] - a[1],
-    )[0]?.[0] || null;
+    const favoriteVendorId =
+      Object.entries(vendorCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || null;
 
     const favoriteVendor = favoriteVendorId
       ? await getPrisma().Vendor.findUnique({
@@ -206,7 +204,12 @@ const getCustomerInsights = async (userId) => {
 /**
  * Get personalized recommendations based on order history
  */
-const getRecommendedVendors = async (userId, latitude, longitude, radius = 5) => {
+const getRecommendedVendors = async (
+  userId,
+  latitude,
+  longitude,
+  radius = 5,
+) => {
   try {
     const user = await getPrisma().User.findUnique({
       where: { id: userId },
@@ -227,7 +230,10 @@ const getRecommendedVendors = async (userId, latitude, longitude, radius = 5) =>
       ...new Set(user.orders.map((o) => o.vendorId)),
     ].slice(0, 3);
 
-    const { findNearbyVendors, isValidCoordinates } = require("../utils/location");
+    const {
+      findNearbyVendors,
+      isValidCoordinates,
+    } = require("../utils/location");
 
     if (!isValidCoordinates(latitude, longitude)) {
       return { success: false, error: "Invalid coordinates" };

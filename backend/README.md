@@ -479,6 +479,322 @@ Automated Actions:
 
 ---
 
+## 🎯 Phase 3: Customer Experience Endpoints
+
+### Get Nearby Vendors
+
+```bash
+GET /api/v1/customers/nearby-vendors?latitude=6.5244&longitude=3.3792&radius=5
+Headers: Authorization: Bearer {accessToken}
+
+Response:
+{
+  "success": true,
+  "vendors": [
+    {
+      "id": "vendor_123",
+      "name": "Pizza Palace",
+      "logo": "https://...",
+      "distanceKm": "0.5",
+      "averageRating": 4.8,
+      "totalReviews": 142,
+      "acceptanceRate": 0.98,
+      "estimatedDeliveryMinutes": 15
+    }
+  ]
+}
+```
+
+### Get Vendor Menu
+
+```bash
+GET /api/v1/customers/vendors/:vendorId/menu
+Headers: Authorization: Bearer {accessToken} (optional)
+
+Response:
+{
+  "success": true,
+  "vendor": { "id": "...", "name": "Pizza Palace", ... },
+  "categories": [
+    {
+      "name": "Pizzas",
+      "products": [
+        {
+          "id": "prod_123",
+          "name": "Pepperoni",
+          "price": 3500,
+          "description": "Classic pepperoni pizza",
+          "image": "https://..."
+        }
+      ]
+    }
+  ],
+  "metrics": {
+    "totalOrders": 1200,
+    "averageRating": 4.8,
+    "acceptanceRate": 0.98
+  }
+}
+```
+
+### Get Order History
+
+```bash
+GET /api/v1/customers/order-history?page=1&limit=10&status=COMPLETED
+Headers: Authorization: Bearer {accessToken}
+
+Query Parameters:
+- page: Page number (default: 1)
+- limit: Results per page (default: 10, max: 50)
+- status: Filter by order status (optional)
+
+Response:
+{
+  "success": true,
+  "orders": [
+    {
+      "id": "ord_abc123",
+      "status": "COMPLETED",
+      "totalAmount": 4500,
+      "createdAt": "2025-05-10T14:30:00Z",
+      "completedAt": "2025-05-10T14:45:00Z",
+      "vendor": {
+        "id": "vendor_123",
+        "name": "Pizza Palace",
+        "logo": "https://..."
+      },
+      "itemCount": 2,
+      "rating": 5,
+      "reviewId": "rev_123"
+    }
+  ],
+  "pagination": {
+    "page": 1,
+    "limit": 10,
+    "total": 15,
+    "totalPages": 2
+  }
+}
+```
+
+### Submit Order Review
+
+```bash
+POST /api/v1/customers/orders/:orderId/review
+Headers: Authorization: Bearer {accessToken}
+Body: {
+  "rating": 5,
+  "comment": "Amazing food and fast delivery!",
+  "foodQuality": 5,
+  "deliverySpeed": 4,
+  "driverBehavior": 5
+}
+
+Validation:
+- rating: Required, must be 1-5
+- comment: Optional, max 500 chars
+- foodQuality, deliverySpeed, driverBehavior: Optional, 1-5 if provided
+
+Response:
+{
+  "success": true,
+  "message": "Review submitted successfully",
+  "review": {
+    "id": "rev_123",
+    "rating": 5,
+    "comment": "Amazing food and fast delivery!",
+    "createdAt": "2025-05-10T14:50:00Z"
+  }
+}
+```
+
+### Get Vendor Reviews
+
+```bash
+GET /api/v1/customers/vendors/:vendorId/reviews?page=1&limit=10&sortBy=recent
+Headers: Authorization: Bearer {accessToken} (optional)
+
+Query Parameters:
+- page: Page number (default: 1)
+- limit: Results per page (default: 10, max: 50)
+- sortBy: recent | highest | lowest (default: recent)
+
+Response:
+{
+  "success": true,
+  "vendor": {
+    "id": "vendor_123",
+    "name": "Pizza Palace",
+    "averageRating": 4.8,
+    "totalReviews": 143
+  },
+  "reviews": [
+    {
+      "id": "rev_123",
+      "rating": 5,
+      "comment": "Amazing food and fast delivery!",
+      "foodQuality": 5,
+      "deliverySpeed": 4,
+      "driverBehavior": 5,
+      "user": {
+        "id": "user_123",
+        "name": "John D."
+      },
+      "createdAt": "2025-05-10T14:50:00Z"
+    }
+  ],
+  "ratingDistribution": {
+    "5": 120,
+    "4": 18,
+    "3": 3,
+    "2": 2,
+    "1": 0
+  },
+  "pagination": {
+    "page": 1,
+    "limit": 10,
+    "total": 143,
+    "totalPages": 15
+  }
+}
+```
+
+### Get Order Review
+
+```bash
+GET /api/v1/customers/orders/:orderId/review
+Headers: Authorization: Bearer {accessToken}
+
+Response:
+{
+  "success": true,
+  "review": {
+    "id": "rev_123",
+    "rating": 5,
+    "comment": "Amazing food and fast delivery!",
+    "foodQuality": 5,
+    "deliverySpeed": 4,
+    "driverBehavior": 5,
+    "vendor": {
+      "id": "vendor_123",
+      "name": "Pizza Palace"
+    },
+    "createdAt": "2025-05-10T14:50:00Z",
+    "updatedAt": "2025-05-10T14:50:00Z"
+  }
+}
+```
+
+### Get Loyalty Points
+
+```bash
+GET /api/v1/customers/loyalty-points
+Headers: Authorization: Bearer {accessToken}
+
+Response:
+{
+  "success": true,
+  "loyaltyPoints": 350,
+  "pointsEarned": 450,
+  "pointsRedeemed": 100,
+  "tier": "LOYAL",
+  "earningRate": 0.02,
+  "nextTier": {
+    "name": "PLATINUM",
+    "ordersNeeded": 10,
+    "ordersCompleted": 4
+  }
+}
+```
+
+### Redeem Loyalty Points
+
+```bash
+POST /api/v1/customers/loyalty-points/redeem
+Headers: Authorization: Bearer {accessToken}
+Body: {
+  "pointsToRedeem": 100
+}
+
+Validation:
+- pointsToRedeem: Minimum 50 points
+- Must have sufficient points balance
+
+Response:
+{
+  "success": true,
+  "message": "Redeemed 100 points for ₦100 discount",
+  "pointsRedeemed": 100,
+  "discountNaira": 100,
+  "remainingPoints": 250
+}
+```
+
+### Get Customer Insights
+
+```bash
+GET /api/v1/customers/insights
+Headers: Authorization: Bearer {accessToken}
+
+Response:
+{
+  "success": true,
+  "insights": {
+    "totalOrders": 12,
+    "totalSpent": 45000,
+    "avgOrderValue": 3750,
+    "recentOrdersThisMonth": 3,
+    "frequencyPerWeek": "0.8",
+    "favoriteVendor": {
+      "id": "vendor_123",
+      "name": "Pizza Palace",
+      "logo": "https://..."
+    },
+    "loyaltyTier": "LOYAL",
+    "pointsBalance": 350
+  }
+}
+```
+
+### Get Personalized Recommendations
+
+```bash
+GET /api/v1/customers/recommendations?latitude=6.5244&longitude=3.3792&radius=5
+Headers: Authorization: Bearer {accessToken}
+
+Query Parameters:
+- latitude: Customer's latitude (required)
+- longitude: Customer's longitude (required)
+- radius: Search radius in km (default: 5)
+
+Response:
+{
+  "success": true,
+  "recommendations": [
+    {
+      "id": "vendor_123",
+      "name": "Pizza Palace",
+      "logo": "https://...",
+      "distanceKm": "0.5",
+      "rating": 4.8,
+      "isFavorite": true,
+      "reason": "You frequently order from here"
+    },
+    {
+      "id": "vendor_456",
+      "name": "Burger King",
+      "logo": "https://...",
+      "distanceKm": "1.2",
+      "rating": 4.6,
+      "isFavorite": false,
+      "reason": "Highly rated in your area"
+    }
+  ]
+}
+```
+
+---
+
 ## ⚡ Rate Limiting
 
 | Endpoint                                                 | Limit    | Window              |
@@ -588,13 +904,19 @@ socket.on("order:statusUpdated", { orderId, status });
 - [x] 10-minute auto-kill timer for unaccepted orders
 - [x] DVC completion: ACCEPTED → OUT_FOR_DELIVERY → DELIVERED → COMPLETED
 
-### Phase 3: Customer Experience ⏳
+### Phase 3: Customer Experience ✅
 
-- [ ] Nearby vendors endpoint (core logic ready)
-- [ ] Vendor menu endpoint (core logic ready)
-- [ ] Customer order tracking with real-time updates
-- [ ] Loyalty points balance endpoint
-- [ ] Consistent order detail responses
+- [x] Nearby vendors endpoint with distance sorting
+- [x] Vendor menu endpoint with categories
+- [x] Customer order tracking with full details
+- [x] Loyalty points balance and tier system
+- [x] Order history with pagination and status filtering
+- [x] Review submission with rating aggregation
+- [x] Vendor reviews listing with sorting and distribution
+- [x] Customer insights (spend, frequency, preferences)
+- [x] Personalized vendor recommendations
+- [x] Loyalty points redemption (50+ points = discount)
+- [x] Automatic points crediting on order completion
 
 ### Phase 4: Vendor Operations ⏳
 

@@ -6,10 +6,7 @@ const express = require("express");
 const router = express.Router();
 const { authenticateToken, optionalAuth } = require("../middleware/auth");
 const { createMemberAccountService } = require("../services/memberAuthService");
-const {
-  findNearbyVendors,
-  isValidCoordinates,
-} = require("../utils/location");
+const { findNearbyVendors, isValidCoordinates } = require("../utils/location");
 const {
   redeemLoyaltyPoints,
   getLoyaltyTier,
@@ -85,7 +82,9 @@ router.get("/nearby-vendors", authenticateToken, async (req, res) => {
           return a.distance - b.distance;
         }
 
-        return (b.metrics?.acceptanceRate || 0) - (a.metrics?.acceptanceRate || 0);
+        return (
+          (b.metrics?.acceptanceRate || 0) - (a.metrics?.acceptanceRate || 0)
+        );
       })
       .map((vendor) => ({
         id: vendor.id,
@@ -258,7 +257,8 @@ router.get("/orders/:orderId", authenticateToken, async (req, res) => {
       order.status === "COMPLETED" || order.status === "DELIVERED"
         ? 0
         : order.vendor
-          ? 20 + order.items.reduce((max, item) => {
+          ? 20 +
+            order.items.reduce((max, item) => {
               return Math.max(max, item.product?.preparationTime || 15);
             }, 0)
           : 35;
