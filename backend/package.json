@@ -9,7 +9,8 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio",
-    "test": "jest --watch"
+    "test": "jest --runInBand",
+    "test:watch": "jest --watch"
   },
   "author": "Racheal",
   "license": "ISC",

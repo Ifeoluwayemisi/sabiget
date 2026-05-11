@@ -14,6 +14,7 @@ const http = require("http");
 // Middleware & Utils
 const { apiLimiter, otpLimiter } = require("./middleware/rateLimiter");
 const { errorHandler, notFoundHandler } = require("./middleware/errorHandler");
+const { autoKillExpiredPendingOrders } = require("./services/orderService");
 
 // ============================================
 // INITIALIZATION
@@ -185,6 +186,23 @@ io.on("connection", (socket) => {
 global.vendorConnections = vendorConnections;
 
 // ============================================
+// BACKGROUND JOBS
+// ============================================
+
+const AUTO_KILL_INTERVAL_MS = 60 * 1000;
+
+const autoKillInterval = setInterval(async () => {
+  try {
+    const processed = await autoKillExpiredPendingOrders();
+    if (processed > 0) {
+      console.log(`[Orders] Auto-killed ${processed} expired pending order(s)`);
+    }
+  } catch (error) {
+    console.error("[Orders] Auto-kill worker error:", error.message);
+  }
+}, AUTO_KILL_INTERVAL_MS);
+
+// ============================================
 // ERROR HANDLING
 // ============================================
 
@@ -200,6 +218,7 @@ app.use(errorHandler);
 
 async function shutdown() {
   console.log("\n[Shutdown] Closing connections...");
+  clearInterval(autoKillInterval);
   await prisma.$disconnect();
   process.exit(0);
 }

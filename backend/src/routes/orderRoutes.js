@@ -3,10 +3,14 @@ const express = require("express");
 const router = express.Router();
 const { authenticateToken, authorize } = require("../middleware/auth");
 const { checkoutLimiter } = require("../middleware/rateLimiter");
-const { initializePayment, initiateRefund } = require("../utils/paystack");
+const { initializePayment } = require("../utils/paystack");
+const {
+  CANCELLABLE_STATUSES,
+  autoKillExpiredPendingOrder,
+  completeDeliveredOrder,
+  triggerOrderRefund,
+} = require("../services/orderService");
 const crypto = require("crypto");
-
-const CANCELLABLE_STATUSES = new Set(["PENDING"]);
 
 function getIdempotencyKey(req) {
   return (
@@ -14,81 +18,6 @@ function getIdempotencyKey(req) {
     req.body?.idempotencyKey ||
     crypto.randomUUID()
   );
-}
-
-function isAcceptanceExpired(order) {
-  return (
-    order.status === "PENDING" &&
-    order.acceptanceDeadline &&
-    new Date(order.acceptanceDeadline) <= new Date()
-  );
-}
-
-async function triggerOrderRefund(order, reason) {
-  if (
-    order.status === "REFUNDED" ||
-    order.refundInitiatedAt ||
-    order.refundCompletedAt
-  ) {
-    return {
-      success: true,
-      alreadyRefunded: true,
-    };
-  }
-
-  const refundResult = await initiateRefund({
-    transactionId: order.paymentReference,
-    amount: order.totalAmount,
-    reason,
-  });
-
-  if (!refundResult.success) {
-    return refundResult;
-  }
-
-  await global.prisma.Order.update({
-    where: { id: order.id },
-    data: {
-      status: "REFUNDED",
-      refundInitiatedAt: new Date(),
-      refundCompletedAt: new Date(),
-      refundAmount: order.totalAmount,
-    },
-  });
-
-  return refundResult;
-}
-
-async function autoKillExpiredPendingOrder(order) {
-  if (!isAcceptanceExpired(order)) {
-    return order;
-  }
-
-  const autoKilledOrder = await global.prisma.Order.update({
-    where: { id: order.id },
-    data: {
-      status: "CANCELLED_AUTO_KILL",
-      autoKilledAt: new Date(),
-      cancelledAt: new Date(),
-      acceptanceDeadline: null,
-      adminNotes: "Acceptance window expired before vendor action",
-    },
-  });
-
-  const refundResult = await triggerOrderRefund(
-    autoKilledOrder,
-    "Order auto-cancelled after vendor acceptance timeout",
-  );
-
-  if (!refundResult.success) {
-    throw new Error(
-      `Auto-kill refund failed for order ${order.id}: ${refundResult.error}`,
-    );
-  }
-
-  return global.prisma.Order.findUnique({
-    where: { id: order.id },
-  });
 }
 
 /**
@@ -670,6 +599,70 @@ router.post(
       });
     } catch (error) {
       res.status(500).json({ success: false, error: error.message });
+    }
+  },
+);
+
+/**
+ * POST /api/orders/:id/complete
+ * Finalize a delivered order and unlock settlement
+ */
+router.post(
+  "/:id/complete",
+  authenticateToken,
+  authorize("VENDOR", "ADMIN", "SUPER_ADMIN"),
+  async (req, res) => {
+    try {
+      const { id } = req.params;
+      const userId = req.user.userId;
+      const role = req.user.role;
+
+      const order = await global.prisma.Order.findUnique({
+        where: { id },
+      });
+
+      if (!order) {
+        return res.status(404).json({
+          success: false,
+          error: "Order not found",
+        });
+      }
+
+      if (role === "VENDOR") {
+        const vendor = await global.prisma.Vendor.findUnique({
+          where: { userId },
+        });
+
+        if (!vendor || order.vendorId !== vendor.id) {
+          return res.status(403).json({
+            success: false,
+            error: "Not authorized to complete this order",
+          });
+        }
+      }
+
+      const result = await completeDeliveredOrder(id);
+
+      if (!result.success) {
+        return res.status(400).json({
+          success: false,
+          error: result.error,
+        });
+      }
+
+      return res.json({
+        success: true,
+        message: result.alreadyCompleted
+          ? "Order already completed"
+          : "Order completed successfully",
+        orderId: id,
+        status: result.order.status,
+      });
+    } catch (error) {
+      return res.status(500).json({
+        success: false,
+        error: error.message,
+      });
     }
   },
 );

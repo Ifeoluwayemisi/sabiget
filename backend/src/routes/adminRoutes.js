@@ -2,6 +2,95 @@
 const express = require("express");
 const router = express.Router();
 const { authenticateToken, authorize } = require("../middleware/auth");
+const { triggerOrderRefund } = require("../services/orderService");
+
+function getPrisma() {
+  return global.prisma;
+}
+
+function getPagination(query) {
+  const page = Math.max(parseInt(query.page, 10) || 1, 1);
+  const limit = Math.min(Math.max(parseInt(query.limit, 10) || 20, 1), 100);
+
+  return {
+    page,
+    limit,
+    skip: (page - 1) * limit,
+  };
+}
+
+function getRequestMetadata(req) {
+  return {
+    ipAddress: req.ip,
+    userAgent: req.get("user-agent") || null,
+  };
+}
+
+async function createAuditLog(req, payload) {
+  const prisma = getPrisma();
+  if (!prisma.AuditLog?.create) {
+    return null;
+  }
+
+  return prisma.AuditLog.create({
+    data: {
+      adminId: req.user.userId,
+      ...payload,
+      ...getRequestMetadata(req),
+    },
+  });
+}
+
+function buildVendorFilter(status, search) {
+  const where = {};
+  const normalizedStatus = status ? String(status).toUpperCase() : null;
+
+  if (normalizedStatus === "ACTIVE") {
+    where.isActive = true;
+  } else if (normalizedStatus === "INACTIVE") {
+    where.isActive = false;
+  } else if (
+    normalizedStatus &&
+    ["PENDING", "VERIFIED", "REJECTED", "SUSPENDED"].includes(normalizedStatus)
+  ) {
+    where.kybStatus = normalizedStatus;
+  }
+
+  if (search) {
+    where.OR = [
+      { name: { contains: search, mode: "insensitive" } },
+      { phone: { contains: search, mode: "insensitive" } },
+      { email: { contains: search, mode: "insensitive" } },
+      { lga: { contains: search, mode: "insensitive" } },
+    ];
+  }
+
+  return where;
+}
+
+function buildOrderFilter(status, vendorId) {
+  const where = {};
+
+  if (status) {
+    where.status = String(status).toUpperCase();
+  }
+
+  if (vendorId) {
+    where.vendorId = vendorId;
+  }
+
+  return where;
+}
+
+function buildDisputeFilter(status) {
+  if (!status) {
+    return {};
+  }
+
+  return {
+    status: String(status).toUpperCase(),
+  };
+}
 
 /**
  * GET /api/admin/dashboard
@@ -13,19 +102,49 @@ router.get(
   authorize("ADMIN", "SUPER_ADMIN"),
   async (req, res) => {
     try {
-      // TODO: Fetch dashboard metrics (GMV, revenue, vendor count, etc.)
-      res.json({
-        message: "Admin dashboard data",
+      const prisma = getPrisma();
+
+      const [
+        paidOrderAggregate,
+        vendorCount,
+        activeVendorCount,
+        orderCount,
+        pendingOrderCount,
+        disputeCount,
+      ] = await Promise.all([
+        prisma.Order.aggregate({
+          where: {
+            status: {
+              in: ["PENDING", "ACCEPTED", "OUT_FOR_DELIVERY", "DELIVERED", "COMPLETED"],
+            },
+          },
+          _sum: {
+            totalAmount: true,
+            platformFee: true,
+          },
+        }),
+        prisma.Vendor.count(),
+        prisma.Vendor.count({ where: { isActive: true } }),
+        prisma.Order.count(),
+        prisma.Order.count({ where: { status: "PENDING" } }),
+        prisma.DisputeReport.count({ where: { status: { in: ["OPEN", "UNDER_REVIEW", "ESCALATED"] } } }),
+      ]);
+
+      return res.json({
+        success: true,
+        message: "Admin dashboard data fetched",
         metrics: {
-          gmv: 0,
-          netRevenue: 0,
-          vendorCount: 0,
-          orderCount: 0,
+          gmv: paidOrderAggregate._sum.totalAmount || 0,
+          netRevenue: paidOrderAggregate._sum.platformFee || 0,
+          vendorCount,
+          activeVendorCount,
+          orderCount,
+          pendingOrderCount,
+          openDisputeCount: disputeCount,
         },
-        info: "Implementation pending",
       });
     } catch (error) {
-      res.status(500).json({ error: error.message });
+      return res.status(500).json({ success: false, error: error.message });
     }
   },
 );
@@ -40,17 +159,46 @@ router.get(
   authorize("ADMIN", "SUPER_ADMIN"),
   async (req, res) => {
     try {
-      const { status, search, page = 1, limit = 20 } = req.query;
+      const prisma = getPrisma();
+      const { status, search } = req.query;
+      const { page, limit, skip } = getPagination(req.query);
+      const where = buildVendorFilter(status, search);
 
-      // TODO: Fetch vendors with pagination and filters
-      res.json({
-        message: "Vendors list",
-        filters: { status, search },
-        pagination: { page, limit },
-        info: "Implementation pending",
+      const [vendors, total] = await Promise.all([
+        prisma.Vendor.findMany({
+          where,
+          skip,
+          take: limit,
+          orderBy: { createdAt: "desc" },
+          include: {
+            metrics: true,
+            user: {
+              select: {
+                id: true,
+                name: true,
+                phone: true,
+                email: true,
+              },
+            },
+          },
+        }),
+        prisma.Vendor.count({ where }),
+      ]);
+
+      return res.json({
+        success: true,
+        message: "Vendors fetched",
+        filters: { status: status || null, search: search || null },
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages: Math.max(Math.ceil(total / limit), 1),
+        },
+        vendors,
       });
     } catch (error) {
-      res.status(500).json({ error: error.message });
+      return res.status(500).json({ success: false, error: error.message });
     }
   },
 );
@@ -65,18 +213,64 @@ router.patch(
   authorize("ADMIN", "SUPER_ADMIN"),
   async (req, res) => {
     try {
+      const prisma = getPrisma();
       const { id } = req.params;
-      const { approved } = req.body;
+      const { approved, reason } = req.body;
 
-      // TODO: Update vendor KYB status
-      res.json({
+      if (typeof approved !== "boolean") {
+        return res.status(400).json({
+          success: false,
+          error: "`approved` must be a boolean",
+        });
+      }
+
+      const existingVendor = await prisma.Vendor.findUnique({
+        where: { id },
+      });
+
+      if (!existingVendor) {
+        return res.status(404).json({
+          success: false,
+          error: "Vendor not found",
+        });
+      }
+
+      const updatedVendor = await prisma.Vendor.update({
+        where: { id },
+        data: {
+          isVerified: approved,
+          verifiedAt: approved ? new Date() : null,
+          kybStatus: approved ? "VERIFIED" : "REJECTED",
+          isActive: approved ? existingVendor.isActive : false,
+        },
+      });
+
+      await createAuditLog(req, {
+        action: approved ? "VENDOR_VERIFIED" : "VENDOR_REJECTED",
+        targetType: "VENDOR",
+        targetId: id,
+        reason: reason || null,
+        changes: {
+          before: {
+            isVerified: existingVendor.isVerified,
+            kybStatus: existingVendor.kybStatus,
+            isActive: existingVendor.isActive,
+          },
+          after: {
+            isVerified: updatedVendor.isVerified,
+            kybStatus: updatedVendor.kybStatus,
+            isActive: updatedVendor.isActive,
+          },
+        },
+      });
+
+      return res.json({
+        success: true,
         message: "Vendor verification updated",
-        vendorId: id,
-        kybStatus: approved ? "VERIFIED" : "REJECTED",
-        info: "Implementation pending",
+        vendor: updatedVendor,
       });
     } catch (error) {
-      res.status(500).json({ error: error.message });
+      return res.status(500).json({ success: false, error: error.message });
     }
   },
 );
@@ -91,18 +285,59 @@ router.patch(
   authorize("ADMIN", "SUPER_ADMIN"),
   async (req, res) => {
     try {
+      const prisma = getPrisma();
       const { id } = req.params;
       const { reason } = req.body;
 
-      // TODO: Deactivate vendor and create audit log
-      res.json({
-        message: "Vendor deactivated",
-        vendorId: id,
-        reason,
-        info: "Implementation pending",
+      if (!reason || !String(reason).trim()) {
+        return res.status(400).json({
+          success: false,
+          error: "A deactivation reason is required",
+        });
+      }
+
+      const existingVendor = await prisma.Vendor.findUnique({
+        where: { id },
+      });
+
+      if (!existingVendor) {
+        return res.status(404).json({
+          success: false,
+          error: "Vendor not found",
+        });
+      }
+
+      const updatedVendor = await prisma.Vendor.update({
+        where: { id },
+        data: {
+          isActive: false,
+        },
+      });
+
+      await createAuditLog(req, {
+        action: "VENDOR_DEACTIVATED",
+        targetType: "VENDOR",
+        targetId: id,
+        reason: String(reason).trim(),
+        changes: {
+          before: {
+            isActive: existingVendor.isActive,
+          },
+          after: {
+            isActive: updatedVendor.isActive,
+          },
+        },
+      });
+
+      return res.json({
+        success: true,
+        message: existingVendor.isActive
+          ? "Vendor deactivated"
+          : "Vendor already inactive",
+        vendor: updatedVendor,
       });
     } catch (error) {
-      res.status(500).json({ error: error.message });
+      return res.status(500).json({ success: false, error: error.message });
     }
   },
 );
@@ -117,17 +352,58 @@ router.get(
   authorize("ADMIN", "SUPER_ADMIN"),
   async (req, res) => {
     try {
-      const { status, vendorId, page = 1, limit = 20 } = req.query;
+      const prisma = getPrisma();
+      const { status, vendorId } = req.query;
+      const { page, limit, skip } = getPagination(req.query);
+      const where = buildOrderFilter(status, vendorId);
 
-      // TODO: Fetch orders with filters and pagination
-      res.json({
-        message: "Orders list",
-        filters: { status, vendorId },
-        pagination: { page, limit },
-        info: "Implementation pending",
+      const [orders, total] = await Promise.all([
+        prisma.Order.findMany({
+          where,
+          skip,
+          take: limit,
+          orderBy: { createdAt: "desc" },
+          include: {
+            vendor: {
+              select: {
+                id: true,
+                name: true,
+                phone: true,
+              },
+            },
+            user: {
+              select: {
+                id: true,
+                name: true,
+                phone: true,
+              },
+            },
+            items: {
+              select: {
+                id: true,
+                quantity: true,
+                totalPrice: true,
+              },
+            },
+          },
+        }),
+        prisma.Order.count({ where }),
+      ]);
+
+      return res.json({
+        success: true,
+        message: "Orders fetched",
+        filters: { status: status || null, vendorId: vendorId || null },
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages: Math.max(Math.ceil(total / limit), 1),
+        },
+        orders,
       });
     } catch (error) {
-      res.status(500).json({ error: error.message });
+      return res.status(500).json({ success: false, error: error.message });
     }
   },
 );
@@ -142,16 +418,59 @@ router.get(
   authorize("ADMIN", "SUPER_ADMIN"),
   async (req, res) => {
     try {
+      const prisma = getPrisma();
       const { id } = req.params;
 
-      // TODO: Fetch full order details and audit trail
-      res.json({
-        message: "Order details for admin",
-        orderId: id,
-        info: "Implementation pending",
+      const order = await prisma.Order.findUnique({
+        where: { id },
+        include: {
+          items: {
+            include: {
+              product: true,
+            },
+          },
+          vendor: true,
+          user: {
+            select: {
+              id: true,
+              name: true,
+              phone: true,
+              email: true,
+              role: true,
+            },
+          },
+          reviews: true,
+          webhookLogs: {
+            orderBy: { createdAt: "desc" },
+          },
+        },
+      });
+
+      if (!order) {
+        return res.status(404).json({
+          success: false,
+          error: "Order not found",
+        });
+      }
+
+      const auditLogs = prisma.AuditLog?.findMany
+        ? await prisma.AuditLog.findMany({
+            where: {
+              targetType: "ORDER",
+              targetId: id,
+            },
+            orderBy: { createdAt: "desc" },
+          })
+        : [];
+
+      return res.json({
+        success: true,
+        message: "Order details fetched",
+        order,
+        auditLogs,
       });
     } catch (error) {
-      res.status(500).json({ error: error.message });
+      return res.status(500).json({ success: false, error: error.message });
     }
   },
 );
@@ -166,20 +485,74 @@ router.post(
   authorize("ADMIN", "SUPER_ADMIN"),
   async (req, res) => {
     try {
+      const prisma = getPrisma();
       const { id } = req.params;
       const { reason } = req.body;
-      const adminId = req.user.userId;
 
-      // TODO: Trigger Paystack reverse-split and create audit log
-      res.json({
-        message: "Order force refunded",
-        orderId: id,
-        status: "REFUNDED",
-        reason,
-        info: "Implementation pending",
+      if (!reason || !String(reason).trim()) {
+        return res.status(400).json({
+          success: false,
+          error: "A refund reason is required",
+        });
+      }
+
+      const order = await prisma.Order.findUnique({
+        where: { id },
+      });
+
+      if (!order) {
+        return res.status(404).json({
+          success: false,
+          error: "Order not found",
+        });
+      }
+
+      const refundResult = await triggerOrderRefund(
+        order,
+        `Admin force refund: ${String(reason).trim()}`,
+      );
+
+      if (!refundResult.success) {
+        return res.status(502).json({
+          success: false,
+          error: refundResult.error || "Refund failed",
+        });
+      }
+
+      const updatedOrder = await prisma.Order.update({
+        where: { id },
+        data: {
+          forceRefundedByAdmin: true,
+          adminNotes: String(reason).trim(),
+        },
+      });
+
+      await createAuditLog(req, {
+        action: "ORDER_FORCE_REFUND",
+        targetType: "ORDER",
+        targetId: id,
+        reason: String(reason).trim(),
+        changes: {
+          before: {
+            status: order.status,
+            forceRefundedByAdmin: order.forceRefundedByAdmin,
+          },
+          after: {
+            status: updatedOrder.status,
+            forceRefundedByAdmin: updatedOrder.forceRefundedByAdmin,
+          },
+        },
+      });
+
+      return res.json({
+        success: true,
+        message: refundResult.alreadyRefunded
+          ? "Order was already refunded"
+          : "Order force refunded",
+        order: updatedOrder,
       });
     } catch (error) {
-      res.status(500).json({ error: error.message });
+      return res.status(500).json({ success: false, error: error.message });
     }
   },
 );
@@ -194,17 +567,44 @@ router.get(
   authorize("ADMIN", "SUPER_ADMIN"),
   async (req, res) => {
     try {
-      const { status, page = 1, limit = 20 } = req.query;
+      const prisma = getPrisma();
+      const { status } = req.query;
+      const { page, limit, skip } = getPagination(req.query);
+      const where = buildDisputeFilter(status);
 
-      // TODO: Fetch disputes with filters
-      res.json({
-        message: "Disputes list",
-        filters: { status },
-        pagination: { page, limit },
-        info: "Implementation pending",
+      const [disputes, total] = await Promise.all([
+        prisma.DisputeReport.findMany({
+          where,
+          skip,
+          take: limit,
+          orderBy: { createdAt: "desc" },
+          include: {
+            user: {
+              select: {
+                id: true,
+                name: true,
+                phone: true,
+              },
+            },
+          },
+        }),
+        prisma.DisputeReport.count({ where }),
+      ]);
+
+      return res.json({
+        success: true,
+        message: "Disputes fetched",
+        filters: { status: status || null },
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages: Math.max(Math.ceil(total / limit), 1),
+        },
+        disputes,
       });
     } catch (error) {
-      res.status(500).json({ error: error.message });
+      return res.status(500).json({ success: false, error: error.message });
     }
   },
 );
@@ -219,18 +619,98 @@ router.post(
   authorize("ADMIN", "SUPER_ADMIN"),
   async (req, res) => {
     try {
+      const prisma = getPrisma();
       const { id } = req.params;
       const { resolution, refund } = req.body;
 
-      // TODO: Update dispute status and trigger refund if needed
-      res.json({
+      if (!resolution || !String(resolution).trim()) {
+        return res.status(400).json({
+          success: false,
+          error: "A resolution is required",
+        });
+      }
+
+      const dispute = await prisma.DisputeReport.findUnique({
+        where: { id },
+      });
+
+      if (!dispute) {
+        return res.status(404).json({
+          success: false,
+          error: "Dispute not found",
+        });
+      }
+
+      let refundResult = null;
+      let relatedOrder = null;
+
+      if (refund && dispute.orderId) {
+        relatedOrder = await prisma.Order.findUnique({
+          where: { id: dispute.orderId },
+        });
+
+        if (relatedOrder) {
+          refundResult = await triggerOrderRefund(
+            relatedOrder,
+            `Dispute resolution refund: ${String(resolution).trim()}`,
+          );
+
+          if (!refundResult.success) {
+            return res.status(502).json({
+              success: false,
+              error: refundResult.error || "Refund failed",
+            });
+          }
+        }
+      }
+
+      const resolvedDispute = await prisma.DisputeReport.update({
+        where: { id },
+        data: {
+          status: "RESOLVED",
+          resolution: String(resolution).trim(),
+          resolvedBy: req.user.userId,
+          resolvedAt: new Date(),
+        },
+      });
+
+      if (dispute.orderId) {
+        await prisma.Order.update({
+          where: { id: dispute.orderId },
+          data: {
+            hasDispute: false,
+            disputeResolvedAt: new Date(),
+            adminNotes: String(resolution).trim(),
+          },
+        });
+      }
+
+      await createAuditLog(req, {
+        action: "DISPUTE_RESOLVED",
+        targetType: "DISPUTE",
+        targetId: id,
+        reason: String(resolution).trim(),
+        changes: {
+          before: {
+            status: dispute.status,
+            resolution: dispute.resolution,
+          },
+          after: {
+            status: resolvedDispute.status,
+            resolution: resolvedDispute.resolution,
+            refundTriggered: Boolean(refund && dispute.orderId),
+          },
+        },
+      });
+
+      return res.json({
+        success: true,
         message: "Dispute resolved",
-        disputeId: id,
-        resolution,
-        info: "Implementation pending",
+        dispute: resolvedDispute,
+        refundTriggered: Boolean(refund && relatedOrder),
       });
     } catch (error) {
-      res.status(500).json({ error: error.message });
+      return res.status(500).json({ success: false, error: error.message });
     }
   },
 );
@@ -245,17 +725,55 @@ router.get(
   authorize("ADMIN", "SUPER_ADMIN"),
   async (req, res) => {
     try {
-      const { action, targetType, page = 1, limit = 20 } = req.query;
+      const prisma = getPrisma();
+      const { action, targetType } = req.query;
+      const { page, limit, skip } = getPagination(req.query);
+      const where = {};
 
-      // TODO: Fetch audit logs
-      res.json({
-        message: "Audit logs",
-        filters: { action, targetType },
-        pagination: { page, limit },
-        info: "Implementation pending",
+      if (action) {
+        where.action = action;
+      }
+
+      if (targetType) {
+        where.targetType = String(targetType).toUpperCase();
+      }
+
+      const [logs, total] = await Promise.all([
+        prisma.AuditLog.findMany({
+          where,
+          skip,
+          take: limit,
+          orderBy: { createdAt: "desc" },
+          include: {
+            admin: {
+              select: {
+                id: true,
+                name: true,
+                email: true,
+              },
+            },
+          },
+        }),
+        prisma.AuditLog.count({ where }),
+      ]);
+
+      return res.json({
+        success: true,
+        message: "Audit logs fetched",
+        filters: {
+          action: action || null,
+          targetType: targetType ? String(targetType).toUpperCase() : null,
+        },
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages: Math.max(Math.ceil(total / limit), 1),
+        },
+        logs,
       });
     } catch (error) {
-      res.status(500).json({ error: error.message });
+      return res.status(500).json({ success: false, error: error.message });
     }
   },
 );
@@ -270,13 +788,49 @@ router.get(
   authorize("ADMIN", "SUPER_ADMIN"),
   async (req, res) => {
     try {
-      // TODO: Fetch analytics data (order trends, vendor performance, heatmaps, etc.)
-      res.json({
-        message: "Analytics data",
-        info: "Implementation pending",
+      const prisma = getPrisma();
+
+      const [statusBuckets, topVendors, recentOrders] = await Promise.all([
+        prisma.Order.groupBy({
+          by: ["status"],
+          _count: { status: true },
+        }),
+        prisma.Vendor.findMany({
+          take: 5,
+          orderBy: {
+            metrics: {
+              meritScore: "desc",
+            },
+          },
+          include: {
+            metrics: true,
+          },
+        }),
+        prisma.Order.findMany({
+          take: 10,
+          orderBy: { createdAt: "desc" },
+          select: {
+            id: true,
+            status: true,
+            totalAmount: true,
+            createdAt: true,
+            vendorId: true,
+          },
+        }),
+      ]);
+
+      return res.json({
+        success: true,
+        message: "Analytics data fetched",
+        orderStatusBreakdown: statusBuckets.map((bucket) => ({
+          status: bucket.status,
+          count: bucket._count.status,
+        })),
+        topVendors,
+        recentOrders,
       });
     } catch (error) {
-      res.status(500).json({ error: error.message });
+      return res.status(500).json({ success: false, error: error.message });
     }
   },
 );
