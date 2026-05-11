@@ -2,29 +2,30 @@
 // SabiGet Backend - Main Express Server
 // ============================================
 
-require("dotenv").config();
-const express = require("express");
-const cors = require("cors");
-const helmet = require("helmet");
-const morgan = require("morgan");
-const { PrismaClient } = require("@prisma/client");
-const { Server } = require("socket.io");
-const http = require("http");
-
-// Middleware & Utils
-const { apiLimiter, otpLimiter } = require("./middleware/rateLimiter");
-const { errorHandler, notFoundHandler } = require("./middleware/errorHandler");
-const { autoKillExpiredPendingOrders } = require("./services/orderService");
-
-// ============================================
-// INITIALIZATION
-// ============================================
+import "dotenv/config";
+import http from "node:http";
+import { pathToFileURL } from "node:url";
+import cors from "cors";
+import express from "express";
+import helmet from "helmet";
+import morgan from "morgan";
+import { PrismaClient } from "@prisma/client";
+import { Server } from "socket.io";
+import { errorHandler, notFoundHandler } from "./middleware/errorHandler.js";
+import { apiLimiter, otpLimiter } from "./middleware/rateLimiter.js";
+import authRoutes from "./routes/authRoutes.js";
+import vendorRoutes from "./routes/vendorRoutes.js";
+import productRoutes from "./routes/productRoutes.js";
+import orderRoutes from "./routes/orderRoutes.js";
+import customerRoutes from "./routes/customerRoutes.js";
+import adminRoutes from "./routes/adminRoutes.js";
+import webhookRoutes from "./routes/webhookRoutes.js";
+import { autoKillExpiredPendingOrders } from "./services/orderService.js";
 
 const prisma = new PrismaClient();
 const app = express();
 const server = http.createServer(app);
 
-// Initialize Socket.io for real-time vendor alerts
 const io = new Server(server, {
   cors: {
     origin: process.env.FRONTEND_URL || "http://localhost:3000",
@@ -33,18 +34,11 @@ const io = new Server(server, {
   },
 });
 
-// Store connection for global access
 global.prisma = prisma;
 global.io = io;
 
-// ============================================
-// MIDDLEWARE
-// ============================================
-
-// Security
 app.use(helmet());
 
-// CORS
 app.use(
   cors({
     origin: process.env.FRONTEND_URL || "http://localhost:3000",
@@ -52,7 +46,6 @@ app.use(
   }),
 );
 
-// Body Parsing
 app.use(
   express.json({
     limit: "10mb",
@@ -62,16 +55,8 @@ app.use(
   }),
 );
 app.use(express.urlencoded({ limit: "10mb", extended: true }));
-
-// Logging
 app.use(morgan("combined"));
-
-// Rate Limiting
 app.use(apiLimiter);
-
-// ============================================
-// HEALTH CHECK
-// ============================================
 
 app.get("/health", (req, res) => {
   res.json({
@@ -81,43 +66,19 @@ app.get("/health", (req, res) => {
   });
 });
 
-// ============================================
-// API ROUTES
-// ============================================
+app.use("/api/v1/auth", otpLimiter, authRoutes);
+app.use("/api/v1/vendors", vendorRoutes);
+app.use("/api/v1/products", productRoutes);
+app.use("/api/v1/orders", orderRoutes);
+app.use("/api/v1/customers", customerRoutes);
+app.use("/api/v1/admin", adminRoutes);
+app.use("/api/v1/webhooks", webhookRoutes);
 
-// Auth Routes (with OTP rate limiting)
-app.use("/api/v1/auth", otpLimiter, require("./routes/authRoutes"));
-
-// Vendor Routes
-app.use("/api/v1/vendors", require("./routes/vendorRoutes"));
-
-// Product Routes
-app.use("/api/v1/products", require("./routes/productRoutes"));
-
-// Order Routes
-app.use("/api/v1/orders", require("./routes/orderRoutes"));
-
-// Customer Routes
-app.use("/api/v1/customers", require("./routes/customerRoutes"));
-
-// Admin Routes
-app.use("/api/v1/admin", require("./routes/adminRoutes"));
-
-// Webhook Routes
-app.use("/api/v1/webhooks", require("./routes/webhookRoutes"));
-
-// ============================================
-// SOCKET.IO - Real-time Vendor Notifications
-// ============================================
-
-const vendorConnections = new Map(); // Track vendor socket connections
+const vendorConnections = new Map();
 
 io.on("connection", (socket) => {
   console.log(`[Socket.io] Client connected: ${socket.id}`);
 
-  // ===== Vendor Events =====
-
-  // Vendor joins their order queue
   socket.on("vendor:join", (vendorId) => {
     socket.join(`vendor:${vendorId}`);
     vendorConnections.set(vendorId, socket.id);
@@ -128,14 +89,12 @@ io.on("connection", (socket) => {
     });
   });
 
-  // Vendor accepts an order
   socket.on("order:accept", (data) => {
     const { vendorId, orderId } = data;
     console.log(`[Socket.io] Order ${orderId} accepted by vendor ${vendorId}`);
     socket.emit("order:accepted", { orderId, status: "ACCEPTED" });
   });
 
-  // Vendor updates order status
   socket.on("order:statusUpdate", (data) => {
     const { vendorId, orderId, status } = data;
     console.log(`[Socket.io] Order ${orderId} status updated to ${status}`);
@@ -145,16 +104,12 @@ io.on("connection", (socket) => {
     });
   });
 
-  // Vendor enters DVC code
   socket.on("order:dvcEntered", (data) => {
-    const { vendorId, orderId, dvcCode } = data;
+    const { orderId } = data;
     console.log(`[Socket.io] DVC entered for order ${orderId}`);
     socket.emit("order:dvcReceived", { orderId, success: true });
   });
 
-  // ===== Customer Events =====
-
-  // Customer joins their order tracking room
   socket.on("customer:join", (userId) => {
     socket.join(`customer:${userId}`);
     console.log(`[Socket.io] Customer ${userId} joined order tracking room`);
@@ -164,11 +119,8 @@ io.on("connection", (socket) => {
     });
   });
 
-  // ===== Disconnection =====
-
   socket.on("disconnect", () => {
     console.log(`[Socket.io] Client disconnected: ${socket.id}`);
-    // Remove vendor from connections map
     for (const [vendorId, socketId] of vendorConnections.entries()) {
       if (socketId === socket.id) {
         vendorConnections.delete(vendorId);
@@ -182,12 +134,7 @@ io.on("connection", (socket) => {
   });
 });
 
-// Store vendor connections globally for use in controllers
 global.vendorConnections = vendorConnections;
-
-// ============================================
-// BACKGROUND JOBS
-// ============================================
 
 const AUTO_KILL_INTERVAL_MS = 60 * 1000;
 
@@ -202,53 +149,39 @@ const autoKillInterval = setInterval(async () => {
   }
 }, AUTO_KILL_INTERVAL_MS);
 
-// ============================================
-// ERROR HANDLING
-// ============================================
-
-// 404 Handler
 app.use(notFoundHandler);
-
-// Global Error Handler
 app.use(errorHandler);
-
-// ============================================
-// GRACEFUL SHUTDOWN
-// ============================================
 
 async function shutdown() {
   console.log("\n[Shutdown] Closing connections...");
   clearInterval(autoKillInterval);
   await prisma.$disconnect();
-  process.exit(0);
 }
 
-process.on("SIGINT", shutdown);
-process.on("SIGTERM", shutdown);
+async function startServer() {
+  const PORT = process.env.PORT || 5000;
+  const NODE_ENV = process.env.NODE_ENV || "development";
 
-// ============================================
-// START SERVER
-// ============================================
+  return new Promise((resolve) => {
+    server.listen(PORT, () => {
+      console.log(`SabiGet backend running on http://localhost:${PORT} (${NODE_ENV})`);
+      resolve(server);
+    });
+  });
+}
 
-const PORT = process.env.PORT || 5000;
-const NODE_ENV = process.env.NODE_ENV || "development";
-
-server.listen(PORT, () => {
-  console.log(`
-╔════════════════════════════════════════════════════╗
-║         🍽️  SabiGet Backend v1.0  🍽️              ║
-╚════════════════════════════════════════════════════╝
-
-✅ Server running on: http://localhost:${PORT}
-✅ Environment: ${NODE_ENV}
-✅ Frontend: ${process.env.FRONTEND_URL || "http://localhost:3000"}
-✅ Database: PostgreSQL (Prisma ORM)
-✅ Real-time: Socket.io
-✅ Payment: Paystack Integration
-
-🚀 Ready to accept requests...
-  `);
+process.on("SIGINT", async () => {
+  await shutdown();
+  process.exit(0);
 });
 
-// Export for testing
-module.exports = { app, server, io, prisma };
+process.on("SIGTERM", async () => {
+  await shutdown();
+  process.exit(0);
+});
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  await startServer();
+}
+
+export { app, server, io, prisma, shutdown, startServer };

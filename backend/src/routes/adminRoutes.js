@@ -1,8 +1,9 @@
 // Admin Routes - Dashboard, vendor management, dispute resolution
-const express = require("express");
+import express from "express";
+import { authenticateToken, authorize } from "../middleware/auth.js";
+import { triggerOrderRefund } from "../services/orderService.js";
+
 const router = express.Router();
-const { authenticateToken, authorize } = require("../middleware/auth");
-const { triggerOrderRefund } = require("../services/orderService");
 
 function getPrisma() {
   return global.prisma;
@@ -835,4 +836,4 @@ router.get(
   },
 );
 
-module.exports = router;
+export default router;

@@ -2,34 +2,19 @@
 // Customer Routes
 // ============================================
 
-const express = require("express");
-const router = express.Router();
-const { authenticateToken, optionalAuth } = require("../middleware/auth");
-const { createMemberAccountService } = require("../services/memberAuthService");
-const { findNearbyVendors, isValidCoordinates } = require("../utils/location");
-const {
+import express from "express";
+import { authenticateToken, optionalAuth } from "../middleware/auth.js";
+import { createMemberAccountService } from "../services/memberAuthService.js";
+import { findNearbyVendors, isValidCoordinates } from "../utils/location.js";
+import {
   redeemLoyaltyPoints,
   getLoyaltyTier,
   getPointsEarningRate,
   getCustomerInsights,
   getRecommendedVendors,
-} = require("../services/customerService");
+} from "../services/customerService.js";
 
-function getLoyaltyTier(orderCount) {
-  if (orderCount >= 10) {
-    return "PLATINUM";
-  }
-
-  if (orderCount >= 4) {
-    return "LOYAL";
-  }
-
-  return "STANDARD";
-}
-
-function getPointEarningRate(orderCount) {
-  return orderCount < 3 ? 0.05 : 0.02;
-}
+const router = express.Router();
 
 /**
  * GET /api/v1/customers/nearby-vendors
@@ -343,7 +328,7 @@ router.get("/loyalty-points", authenticateToken, async (req, res) => {
       });
     }
 
-    const earningRate = getPointEarningRate(user.orderCount);
+    const earningRate = getPointsEarningRate(user.orderCount);
 
     return res.json({
       success: true,
@@ -875,4 +860,4 @@ router.post("/create-account", authenticateToken, async (req, res) => {
   }
 });
 
-module.exports = router;
+export default router;

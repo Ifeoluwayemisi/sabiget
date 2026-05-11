@@ -1,4 +1,4 @@
-const express = require("express");
+import express from "express";
 
 async function startTestServer(router, options = {}) {
   const app = express();
@@ -45,4 +45,4 @@ async function startTestServer(router, options = {}) {
   };
 }
 
-module.exports = { startTestServer };
+export { startTestServer };

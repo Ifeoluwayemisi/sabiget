@@ -1,20 +1,21 @@
 // Order Routes - Order management, payment, delivery verification
-const express = require("express");
-const router = express.Router();
-const { authenticateToken, authorize } = require("../middleware/auth");
-const { checkoutLimiter } = require("../middleware/rateLimiter");
-const { initializePayment } = require("../utils/paystack");
-const {
+import crypto from "node:crypto";
+import express from "express";
+import { authenticateToken, authorize } from "../middleware/auth.js";
+import { checkoutLimiter } from "../middleware/rateLimiter.js";
+import { initializePayment } from "../utils/paystack.js";
+import {
   CANCELLABLE_STATUSES,
   autoKillExpiredPendingOrder,
   completeDeliveredOrder,
   triggerOrderRefund,
-} = require("../services/orderService");
-const { generateDVC, generateIdempotencyKey } = require("../utils/generators");
-const {
+} from "../services/orderService.js";
+import { generateDVC, generateIdempotencyKey } from "../utils/generators.js";
+import {
   updateLoyaltyPointsOnOrderCompletion,
-} = require("../services/customerService");
+} from "../services/customerService.js";
 
+const router = express.Router();
 function getIdempotencyKey(req) {
   return (
     req.headers["x-idempotency-key"] ||
@@ -779,4 +780,4 @@ router.post("/webhook/paystack", async (req, res) => {
   });
 });
 
-module.exports = router;
+export default router;

@@ -2,23 +2,15 @@
 // Customer Service - Business Logic
 // ============================================
 
+import { calculateDistance, isValidCoordinates } from "../utils/location.js";
+
 const getPrisma = () => global.prisma;
 
-/**
- * Calculate loyalty points for an order
- * Rules:
- * - First 3 orders: 5% of order total (food cost only)
- * - After 3 orders: 2% of order total
- */
 const calculateOrderPoints = (foodCost, orderCount) => {
   const earnRate = orderCount < 3 ? 0.05 : 0.02;
   return Math.floor(foodCost * earnRate);
 };
 
-/**
- * Update user's loyalty points after order completion
- * Called when order status changes to COMPLETED
- */
 const updateLoyaltyPointsOnOrderCompletion = async (orderId) => {
   try {
     const order = await getPrisma().Order.findUnique({
@@ -60,10 +52,6 @@ const updateLoyaltyPointsOnOrderCompletion = async (orderId) => {
   }
 };
 
-/**
- * Redeem loyalty points for discount on next order
- * Conversion: 100 points = ₦100 discount (1:1 ratio in kobo)
- */
 const redeemLoyaltyPoints = async (userId, pointsToRedeem) => {
   try {
     const user = await getPrisma().User.findUnique({
@@ -89,7 +77,7 @@ const redeemLoyaltyPoints = async (userId, pointsToRedeem) => {
       };
     }
 
-    const discountAmount = pointsToRedeem; // 1:1 conversion (points to kobo/naira)
+    const discountAmount = pointsToRedeem;
 
     const updatedUser = await getPrisma().User.update({
       where: { id: userId },
@@ -105,7 +93,7 @@ const redeemLoyaltyPoints = async (userId, pointsToRedeem) => {
 
     return {
       success: true,
-      message: `Redeemed ${pointsToRedeem} points for ₦${discountAmount / 100} discount`,
+      message: `Redeemed ${pointsToRedeem} points for N${discountAmount / 100} discount`,
       pointsRedeemed: pointsToRedeem,
       discountNaira: discountAmount / 100,
       remainingPoints: updatedUser.loyaltyPoints,
@@ -116,12 +104,9 @@ const redeemLoyaltyPoints = async (userId, pointsToRedeem) => {
   }
 };
 
-/**
- * Get customer's loyalty tier
- */
 const getLoyaltyTier = (orderCount) => {
   if (orderCount >= 10) {
-    return "PLATINUM"; // Highest tier
+    return "PLATINUM";
   }
   if (orderCount >= 4) {
     return "LOYAL";
@@ -129,16 +114,10 @@ const getLoyaltyTier = (orderCount) => {
   return "STANDARD";
 };
 
-/**
- * Get points earning rate based on order count
- */
 const getPointsEarningRate = (orderCount) => {
-  return orderCount < 3 ? 0.05 : 0.02; // 5% initially, then 2%
+  return orderCount < 3 ? 0.05 : 0.02;
 };
 
-/**
- * Get customer insights (spend, frequency, preferences)
- */
 const getCustomerInsights = async (userId) => {
   try {
     const user = await getPrisma().User.findUnique({
@@ -155,12 +134,10 @@ const getCustomerInsights = async (userId) => {
       return { success: false, error: "User not found" };
     }
 
-    // Calculate metrics
-    const totalSpent = user.orders.reduce((sum, o) => sum + o.totalAmount, 0);
+    const totalSpent = user.orders.reduce((sum, order) => sum + order.totalAmount, 0);
     const avgOrderValue =
       user.orders.length > 0 ? totalSpent / user.orders.length : 0;
 
-    // Find most frequently ordered vendor
     const vendorCounts = {};
     user.orders.forEach((order) => {
       vendorCounts[order.vendorId] = (vendorCounts[order.vendorId] || 0) + 1;
@@ -176,17 +153,16 @@ const getCustomerInsights = async (userId) => {
         })
       : null;
 
-    // Calculate order frequency (orders per month)
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
     const recentOrders = user.orders.filter(
-      (o) => new Date(o.createdAt) > thirtyDaysAgo,
+      (order) => new Date(order.createdAt) > thirtyDaysAgo,
     ).length;
 
     return {
       success: true,
       insights: {
         totalOrders: user.orderCount,
-        totalSpent: totalSpent,
+        totalSpent,
         avgOrderValue: avgOrderValue.toFixed(2),
         recentOrdersThisMonth: recentOrders,
         frequencyPerWeek: (recentOrders / 4).toFixed(1),
@@ -201,9 +177,6 @@ const getCustomerInsights = async (userId) => {
   }
 };
 
-/**
- * Get personalized recommendations based on order history
- */
 const getRecommendedVendors = async (
   userId,
   latitude,
@@ -225,15 +198,10 @@ const getRecommendedVendors = async (
       return { success: false, error: "User not found" };
     }
 
-    // Get vendors similar to user's favorite vendors
-    const favoriteVendorIds = [
-      ...new Set(user.orders.map((o) => o.vendorId)),
-    ].slice(0, 3);
-
-    const {
-      findNearbyVendors,
-      isValidCoordinates,
-    } = require("../utils/location");
+    const favoriteVendorIds = [...new Set(user.orders.map((order) => order.vendorId))].slice(
+      0,
+      3,
+    );
 
     if (!isValidCoordinates(latitude, longitude)) {
       return { success: false, error: "Invalid coordinates" };
@@ -247,8 +215,6 @@ const getRecommendedVendors = async (
       include: { metrics: true },
     });
 
-    const { calculateDistance } = require("../utils/location");
-
     const nearby = allNearbyVendors
       .map((vendor) => ({
         ...vendor,
@@ -259,36 +225,28 @@ const getRecommendedVendors = async (
           vendor.longitude,
         ),
       }))
-      .filter((v) => v.distance <= radius)
+      .filter((vendor) => vendor.distance <= radius)
       .sort((a, b) => {
-        // Prioritize favorite vendors
-        if (
-          favoriteVendorIds.includes(a.id) &&
-          !favoriteVendorIds.includes(b.id)
-        ) {
+        if (favoriteVendorIds.includes(a.id) && !favoriteVendorIds.includes(b.id)) {
           return -1;
         }
-        if (
-          !favoriteVendorIds.includes(a.id) &&
-          favoriteVendorIds.includes(b.id)
-        ) {
+        if (!favoriteVendorIds.includes(a.id) && favoriteVendorIds.includes(b.id)) {
           return 1;
         }
-        // Then by rating
         return (b.averageRating || 0) - (a.averageRating || 0);
       })
       .slice(0, 5);
 
     return {
       success: true,
-      recommendations: nearby.map((v) => ({
-        id: v.id,
-        name: v.name,
-        logo: v.logo,
-        distanceKm: v.distance.toFixed(2),
-        rating: v.averageRating,
-        isFavorite: favoriteVendorIds.includes(v.id),
-        reason: favoriteVendorIds.includes(v.id)
+      recommendations: nearby.map((vendor) => ({
+        id: vendor.id,
+        name: vendor.name,
+        logo: vendor.logo,
+        distanceKm: vendor.distance.toFixed(2),
+        rating: vendor.averageRating,
+        isFavorite: favoriteVendorIds.includes(vendor.id),
+        reason: favoriteVendorIds.includes(vendor.id)
           ? "You frequently order from here"
           : "Highly rated in your area",
       })),
@@ -299,7 +257,7 @@ const getRecommendedVendors = async (
   }
 };
 
-module.exports = {
+export {
   calculateOrderPoints,
   updateLoyaltyPointsOnOrderCompletion,
   redeemLoyaltyPoints,

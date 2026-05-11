@@ -1,18 +1,19 @@
 // Vendor Routes - Find vendors, get menus, vendor management
-const express = require("express");
-const router = express.Router();
-const {
+import express from "express";
+import {
   authenticateToken,
   authorize,
   optionalAuth,
-} = require("../middleware/auth");
-const { createSubAccount } = require("../utils/paystack");
-const { hashPassword } = require("../utils/password");
-const {
+} from "../middleware/auth.js";
+import { createSubAccount } from "../utils/paystack.js";
+import { hashPassword } from "../utils/password.js";
+import {
   findNearbyVendors,
   getLGAFromCoordinates,
   isValidCoordinates,
-} = require("../utils/location");
+} from "../utils/location.js";
+
+const router = express.Router();
 
 function getVendorMenuCategories(products) {
   const categoryMap = new Map();
@@ -529,4 +530,4 @@ router.get(
   },
 );
 
-module.exports = router;
+export default router;

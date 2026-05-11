@@ -124,7 +124,7 @@ const isValidCoordinates = (lat, lon) => {
   );
 };
 
-module.exports = {
+export {
   calculateDistance,
   findNearbyVendors,
   decimalToDMS,

@@ -1,12 +1,12 @@
 // Utils for OTP and DVC code generation
-const crypto = require("crypto");
+import crypto from "node:crypto";
 
 /**
  * Generate a random OTP code
  * @param {number} length - Length of OTP (default 6 digits)
  * @returns {string} OTP code
  */
-function generateOTP(length = 6) {
+export function generateOTP(length = 6) {
   const digits = "0123456789";
   let otp = "";
   for (let i = 0; i < length; i++) {
@@ -20,7 +20,7 @@ function generateOTP(length = 6) {
  * 6-character alphanumeric (e.g., XJ42K9)
  * @returns {string} DVC code
  */
-function generateDVC() {
+export function generateDVC() {
   const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
   let dvc = "";
   for (let i = 0; i < 6; i++) {
@@ -33,7 +33,7 @@ function generateDVC() {
  * Generate a unique idempotency key
  * @returns {string} UUID-like key
  */
-function generateIdempotencyKey() {
+export function generateIdempotencyKey() {
   return crypto.randomUUID();
 }
 
@@ -42,7 +42,7 @@ function generateIdempotencyKey() {
  * @param {string} code - The code to hash
  * @returns {string} Hashed code
  */
-function hashCode(code) {
+export function hashCode(code) {
   return crypto
     .createHash("sha256")
     .update(code + process.env.JWT_ACCESS_SECRET) // Salt with secret
@@ -55,15 +55,7 @@ function hashCode(code) {
  * @param {string} hash - Stored hash
  * @returns {boolean} Match result
  */
-function verifyCode(code, hash) {
+export function verifyCode(code, hash) {
   const computedHash = hashCode(code);
   return computedHash === hash;
 }
-
-module.exports = {
-  generateOTP,
-  generateDVC,
-  generateIdempotencyKey,
-  hashCode,
-  verifyCode,
-};

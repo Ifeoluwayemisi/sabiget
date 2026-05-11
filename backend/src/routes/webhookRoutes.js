@@ -2,9 +2,10 @@
 // Webhook Routes (Paystack Callbacks)
 // ============================================
 
-const express = require("express");
+import express from "express";
+import { verifyWebhookSignature } from "../utils/paystack.js";
+
 const router = express.Router();
-const { verifyWebhookSignature } = require("../utils/paystack");
 
 const ACCEPTANCE_WINDOW_MS = 10 * 60 * 1000;
 
@@ -272,4 +273,4 @@ async function handleTransferFailed(data) {
   );
 }
 
-module.exports = router;
+export default router;

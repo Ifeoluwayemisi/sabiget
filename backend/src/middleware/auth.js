@@ -1,5 +1,5 @@
 // Middleware for authentication and authorization
-const { verifyAccessToken } = require("../utils/jwt");
+import { verifyAccessToken } from "../utils/jwt.js";
 
 /**
  * Middleware to verify JWT token from cookies or Authorization header
@@ -64,8 +64,4 @@ function optionalAuth(req, res, next) {
   next();
 }
 
-module.exports = {
-  authenticateToken,
-  authorize,
-  optionalAuth,
-};
+export { authenticateToken, authorize, optionalAuth };

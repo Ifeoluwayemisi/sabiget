@@ -1,26 +1,222 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #fff7f1;
+  --foreground: #1a1a1a;
+
+  --color-brand: #ff4500;
+  --color-brand-strong: #e63d00;
+  --color-brand-soft: #ffefe8;
+  --color-brand-deep: #a82b00;
+
+  --color-accent: #2e7d32;
+  --color-accent-soft: #edf7ee;
+
+  --color-ink: #1a1a1a;
+  --color-ink-muted: #5f5a57;
+  --color-line: rgba(26, 26, 26, 0.08);
+  --color-line-strong: rgba(26, 26, 26, 0.14);
+
+  --color-surface: rgba(255, 255, 255, 0.84);
+  --color-surface-strong: #ffffff;
+  --color-surface-muted: #fff2ea;
+  --color-overlay: rgba(255, 247, 241, 0.7);
+
+  --shadow-soft: 0 18px 48px rgba(153, 61, 17, 0.12);
+  --shadow-card: 0 10px 30px rgba(55, 28, 12, 0.08);
+  --shadow-floating: 0 14px 40px rgba(255, 69, 0, 0.16);
+
+  --radius-pill: 999px;
+  --radius-card: 28px;
+  --radius-panel: 36px;
+
+  --font-sans-stack: "Segoe UI", "Avenir Next", "Helvetica Neue", sans-serif;
+  --font-mono-stack: "SFMono-Regular", "Cascadia Code", "Consolas", monospace;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+
+  --color-brand: var(--color-brand);
+  --color-brand-strong: var(--color-brand-strong);
+  --color-brand-soft: var(--color-brand-soft);
+  --color-brand-deep: var(--color-brand-deep);
+
+  --color-accent: var(--color-accent);
+  --color-accent-soft: var(--color-accent-soft);
+
+  --color-ink: var(--color-ink);
+  --color-ink-muted: var(--color-ink-muted);
+  --color-line: var(--color-line);
+  --color-line-strong: var(--color-line-strong);
+
+  --color-surface: var(--color-surface);
+  --color-surface-strong: var(--color-surface-strong);
+  --color-surface-muted: var(--color-surface-muted);
+  --color-overlay: var(--color-overlay);
+
+  --font-sans: var(--font-sans-stack);
+  --font-mono: var(--font-mono-stack);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
 }
 
 body {
-  background: var(--background);
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at top left, rgba(255, 162, 117, 0.34), transparent 30%),
+    radial-gradient(circle at top right, rgba(255, 217, 167, 0.45), transparent 28%),
+    linear-gradient(180deg, #fff8f3 0%, #fff4ec 48%, #fff7f1 100%);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans);
+  text-rendering: optimizeLegibility;
+}
+
+body::selection {
+  background: rgba(255, 69, 0, 0.18);
+}
+
+a,
+button,
+input,
+select,
+textarea {
+  transition:
+    color 180ms ease,
+    background-color 180ms ease,
+    border-color 180ms ease,
+    box-shadow 180ms ease,
+    transform 180ms ease,
+    opacity 180ms ease;
+}
+
+button,
+[role="button"],
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+@layer base {
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    color: var(--color-ink);
+    letter-spacing: -0.03em;
+  }
+
+  p {
+    color: var(--color-ink-muted);
+  }
+
+  :focus-visible {
+    outline: 3px solid rgba(255, 69, 0, 0.28);
+    outline-offset: 2px;
+  }
+}
+
+@layer utilities {
+  .sabiget-shell {
+    @apply mx-auto w-full max-w-[1360px] px-4 sm:px-6 lg:px-8;
+  }
+
+  .sabiget-panel {
+    background: var(--color-surface);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-panel);
+    box-shadow: var(--shadow-soft);
+    backdrop-filter: blur(16px);
+  }
+
+  .sabiget-card {
+    background: var(--color-surface-strong);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-card);
+    box-shadow: var(--shadow-card);
+  }
+
+  .sabiget-punch {
+    background: linear-gradient(135deg, var(--color-brand) 0%, #ff6a00 100%);
+    color: white;
+    box-shadow: var(--shadow-floating);
+  }
+
+  .sabiget-outline {
+    background: rgba(255, 255, 255, 0.68);
+    border: 1px solid var(--color-line-strong);
+    color: var(--color-ink);
+    backdrop-filter: blur(12px);
+  }
+
+  .sabiget-badge {
+    @apply inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold tracking-[0.08em] uppercase;
+  }
+
+  .sabiget-badge-brand {
+    background: var(--color-brand-soft);
+    color: var(--color-brand-deep);
+  }
+
+  .sabiget-badge-accent {
+    background: var(--color-accent-soft);
+    color: var(--color-accent);
+  }
+
+  .sabiget-noise {
+    position: relative;
+    isolation: isolate;
+  }
+
+  .sabiget-noise::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    opacity: 0.06;
+    background-image:
+      radial-gradient(circle at 20% 20%, currentColor 0 0.7px, transparent 0.9px),
+      radial-gradient(circle at 80% 30%, currentColor 0 0.7px, transparent 0.9px),
+      radial-gradient(circle at 40% 70%, currentColor 0 0.7px, transparent 0.9px);
+    background-size: 22px 22px;
+  }
+
+  .sabiget-grid-glow {
+    background-image:
+      linear-gradient(rgba(26, 26, 26, 0.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(26, 26, 26, 0.04) 1px, transparent 1px);
+    background-size: 34px 34px;
+  }
+
+  .touch-target {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  .text-balance {
+    text-wrap: balance;
+  }
 }

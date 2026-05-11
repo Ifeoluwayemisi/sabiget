@@ -2,32 +2,22 @@
 // Auth Service - Business Logic
 // ============================================
 
-const { generateOTP, hashCode, verifyCode } = require("../utils/generators");
-const {
-  generateAccessToken,
-  generateRefreshToken,
-  generateTokenPair,
-} = require("../utils/jwt");
-const { sendWhatsAppOTP, sendSmsOTP, verifyOTP } = require("../utils/termii");
+import { generateOTP, hashCode, verifyCode } from "../utils/generators.js";
+import { generateTokenPair } from "../utils/jwt.js";
+import { sendWhatsAppOTP, sendSmsOTP } from "../utils/termii.js";
 
-// Prisma will be available globally after app.js initializes
 const getPrisma = () => global.prisma;
 
-/**
- * Send OTP via WhatsApp (primary) or SMS (fallback)
- */
 const sendOTPService = async (phone) => {
   try {
-    // Generate 6-digit OTP
     const otpCode = generateOTP(6);
     const hashedOTP = hashCode(otpCode);
 
-    // Store in database
     const otpLog = await getPrisma().OTPLog.create({
       data: {
         phone,
         code: hashedOTP,
-        expiresAt: new Date(Date.now() + 10 * 60 * 1000), // 10 minutes
+        expiresAt: new Date(Date.now() + 10 * 60 * 1000),
         maxAttempts: 3,
         attempts: 0,
         isUsed: false,
@@ -35,8 +25,6 @@ const sendOTPService = async (phone) => {
     });
 
     console.log(`[OTP] Generated for ${phone}: ${otpCode}`);
-
-    // Try WhatsApp first
     console.log(`[OTP] Attempting WhatsApp delivery to ${phone}`);
     const whatsappResult = await sendWhatsAppOTP({
       phone,
@@ -44,7 +32,7 @@ const sendOTPService = async (phone) => {
     });
 
     if (whatsappResult.success) {
-      console.log(`[OTP] ✓ WhatsApp sent successfully to ${phone}`);
+      console.log(`[OTP] WhatsApp sent successfully to ${phone}`);
       return {
         success: true,
         message: "OTP sent via WhatsApp",
@@ -53,7 +41,6 @@ const sendOTPService = async (phone) => {
       };
     }
 
-    // WhatsApp failed, try SMS after 30 seconds
     console.log(`[OTP] WhatsApp failed, scheduling SMS fallback for ${phone}`);
     setTimeout(async () => {
       console.log(`[OTP] Attempting SMS delivery to ${phone}`);
@@ -63,12 +50,11 @@ const sendOTPService = async (phone) => {
       });
 
       if (smsResult.success) {
-        console.log(`[OTP] ✓ SMS sent successfully to ${phone}`);
-        // Update channel in database (optional)
+        console.log(`[OTP] SMS sent successfully to ${phone}`);
       } else {
-        console.error(`[OTP] ✗ SMS also failed for ${phone}`);
+        console.error(`[OTP] SMS also failed for ${phone}`);
       }
-    }, 30000); // 30 seconds
+    }, 30000);
 
     return {
       success: true,
@@ -82,12 +68,8 @@ const sendOTPService = async (phone) => {
   }
 };
 
-/**
- * Verify OTP and create/update user
- */
 const verifyOTPService = async (phone, code) => {
   try {
-    // Find OTP record
     const otpRecord = await getPrisma().OTPLog.findFirst({
       where: {
         phone,
@@ -105,7 +87,6 @@ const verifyOTPService = async (phone, code) => {
       };
     }
 
-    // Check expiry
     if (new Date() > new Date(otpRecord.expiresAt)) {
       return {
         success: false,
@@ -113,7 +94,6 @@ const verifyOTPService = async (phone, code) => {
       };
     }
 
-    // Check attempts
     if (otpRecord.attempts >= otpRecord.maxAttempts) {
       return {
         success: false,
@@ -121,9 +101,7 @@ const verifyOTPService = async (phone, code) => {
       };
     }
 
-    // Verify code (compare hashed)
     if (!verifyCode(code, otpRecord.code)) {
-      // Increment attempts
       await getPrisma().OTPLog.update({
         where: { id: otpRecord.id },
         data: { attempts: otpRecord.attempts + 1 },
@@ -136,7 +114,6 @@ const verifyOTPService = async (phone, code) => {
       };
     }
 
-    // Mark OTP as used
     await getPrisma().OTPLog.update({
       where: { id: otpRecord.id },
       data: {
@@ -145,7 +122,6 @@ const verifyOTPService = async (phone, code) => {
       },
     });
 
-    // Find or create user (GUEST role)
     let user = await getPrisma().User.findUnique({
       where: { phone },
     });
@@ -162,7 +138,6 @@ const verifyOTPService = async (phone, code) => {
         },
       });
     } else {
-      // Update existing user
       user = await getPrisma().User.update({
         where: { phone },
         data: {
@@ -171,19 +146,17 @@ const verifyOTPService = async (phone, code) => {
       });
     }
 
-    // Generate JWT tokens
     const { accessToken, refreshToken } = generateTokenPair(user);
 
-    // Save refresh token to database
     await getPrisma().RefreshToken.create({
       data: {
         token: refreshToken,
         userId: user.id,
-        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
       },
     });
 
-    console.log(`[OTP] ✓ User ${phone} verified successfully`);
+    console.log(`[OTP] User ${phone} verified successfully`);
 
     return {
       success: true,
@@ -207,7 +180,4 @@ const verifyOTPService = async (phone, code) => {
   }
 };
 
-module.exports = {
-  sendOTPService,
-  verifyOTPService,
-};
+export { sendOTPService, verifyOTPService };

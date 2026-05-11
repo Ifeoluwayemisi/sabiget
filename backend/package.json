@@ -2,6 +2,7 @@
   "name": "sabiget-backend",
   "version": "1.0.0",
   "description": "Backend for SabiGet - Location-aware multi-vendor food marketplace",
+  "type": "module",
   "main": "src/app.js",
   "scripts": {
     "start": "node src/app.js",
@@ -9,8 +10,8 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio",
-    "test": "jest --runInBand",
-    "test:watch": "jest --watch"
+    "test": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js --runInBand --testMatch \"**/src/test/**/*.test.js\"",
+    "test:watch": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js --watch --testMatch \"**/src/test/**/*.test.js\""
   },
   "author": "Racheal",
   "license": "ISC",

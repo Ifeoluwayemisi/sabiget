@@ -2,7 +2,7 @@
 // Termii SMS/WhatsApp Integration
 // ============================================
 
-const axios = require("axios");
+import axios from "axios";
 
 const TERMII_BASE_URL = "https://api.ng.termii.com";
 const TERMII_API_KEY = process.env.TERMII_API_KEY;
@@ -145,7 +145,7 @@ const sendSmsMessage = async (data) => {
   }
 };
 
-module.exports = {
+export {
   sendWhatsAppOTP,
   sendSmsOTP,
   verifyOTP,

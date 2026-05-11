@@ -1,5 +1,5 @@
 // Rate limiting middleware
-const rateLimit = require("express-rate-limit");
+import rateLimit from "express-rate-limit";
 
 /**
  * OTP Request Rate Limiter
@@ -52,9 +52,4 @@ const apiLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-module.exports = {
-  otpLimiter,
-  loginLimiter,
-  checkoutLimiter,
-  apiLimiter,
-};
+export { otpLimiter, loginLimiter, checkoutLimiter, apiLimiter };

@@ -1,23 +1,18 @@
 // Utils for password hashing and verification
-const bcrypt = require("bcryptjs");
+import bcrypt from "bcryptjs";
 
 const SALT_ROUNDS = 10;
 
 /**
  * Hash a password
  */
-async function hashPassword(password) {
+export async function hashPassword(password) {
   return bcrypt.hash(password, SALT_ROUNDS);
 }
 
 /**
  * Verify a password against its hash
  */
-async function verifyPassword(password, hash) {
+export async function verifyPassword(password, hash) {
   return bcrypt.compare(password, hash);
 }
-
-module.exports = {
-  hashPassword,
-  verifyPassword,
-};

@@ -2,7 +2,8 @@
 // Paystack Payment Integration
 // ============================================
 
-const axios = require("axios");
+import axios from "axios";
+import crypto from "node:crypto";
 
 const PAYSTACK_BASE_URL = "https://api.paystack.co";
 const PAYSTACK_SECRET = process.env.PAYSTACK_SECRET_KEY;
@@ -200,7 +201,6 @@ const initiateRefund = async (data) => {
  * @returns {boolean} - True if valid
  */
 const verifyWebhookSignature = (body, signature) => {
-  const crypto = require("crypto");
   const hash = crypto
     .createHmac("sha512", PAYSTACK_SECRET)
     .update(body)
@@ -217,7 +217,7 @@ const generatePaystackReference = () => {
   return `SG-${Date.now()}-${Math.random().toString(36).substr(2, 9).toUpperCase()}`;
 };
 
-module.exports = {
+export {
   initializePayment,
   verifyPayment,
   createSubAccount,

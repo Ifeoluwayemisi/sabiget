@@ -1,4 +1,4 @@
-const { initiateRefund } = require("../utils/paystack");
+import { initiateRefund } from "../utils/paystack.js";
 
 const CANCELLABLE_STATUSES = new Set(["PENDING"]);
 
@@ -147,7 +147,7 @@ async function completeDeliveredOrder(orderId, notes = "Order payout unlocked") 
   };
 }
 
-module.exports = {
+export {
   CANCELLABLE_STATUSES,
   isAcceptanceExpired,
   triggerOrderRefund,

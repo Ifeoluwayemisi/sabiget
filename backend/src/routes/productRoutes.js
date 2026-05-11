@@ -1,7 +1,8 @@
 // Product Routes - Menu management
-const express = require("express");
+import express from "express";
+import { authenticateToken, authorize } from "../middleware/auth.js";
+
 const router = express.Router();
-const { authenticateToken, authorize } = require("../middleware/auth");
 
 /**
  * GET /api/products
@@ -167,4 +168,4 @@ router.delete(
   },
 );
 
-module.exports = router;
+export default router;

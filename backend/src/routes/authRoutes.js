@@ -1,10 +1,11 @@
 // Auth Routes - OTP, Login, Token Refresh
-const express = require("express");
+import express from "express";
+import * as authController from "../controllers/authController.js";
+import * as memberAuthController from "../controllers/memberAuthController.js";
+import { otpLimiter, loginLimiter } from "../middleware/rateLimiter.js";
+import { authenticateToken } from "../middleware/auth.js";
+
 const router = express.Router();
-const authController = require("../controllers/authController");
-const memberAuthController = require("../controllers/memberAuthController");
-const { otpLimiter, loginLimiter } = require("../middleware/rateLimiter");
-const { authenticateToken } = require("../middleware/auth");
 
 /**
  * POST /api/v1/auth/send-otp
@@ -96,4 +97,4 @@ router.get("/me", authenticateToken, async (req, res) => {
   }
 });
 
-module.exports = router;
+export default router;

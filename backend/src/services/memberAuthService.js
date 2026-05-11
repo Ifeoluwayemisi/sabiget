@@ -2,19 +2,11 @@
 // Member Auth Service - Business Logic
 // ============================================
 
-const { hashPassword, verifyPassword } = require("../utils/password");
-const { generateTokenPair } = require("../utils/jwt");
+import { hashPassword, verifyPassword } from "../utils/password.js";
+import { generateTokenPair } from "../utils/jwt.js";
 
-// Prisma will be available globally after app.js initializes
 const getPrisma = () => global.prisma;
 
-/**
- * Create member account (GUEST → MEMBER conversion)
- * Requirements:
- * - User must be GUEST (OTP verified)
- * - Must provide strong password
- * - Optional: name, email
- */
 const createMemberAccountService = async ({
   userId,
   phone,
@@ -24,7 +16,6 @@ const createMemberAccountService = async ({
 }) => {
   try {
     const prisma = getPrisma();
-
     const lookup = userId ? { id: userId } : { phone };
     const user = await prisma.User.findUnique({
       where: lookup,
@@ -37,7 +28,6 @@ const createMemberAccountService = async ({
       };
     }
 
-    // Check if user is still GUEST
     if (user.role !== "GUEST") {
       return {
         success: false,
@@ -58,7 +48,6 @@ const createMemberAccountService = async ({
       }
     }
 
-    // Validate password strength
     if (password.length < 8) {
       return {
         success: false,
@@ -66,12 +55,10 @@ const createMemberAccountService = async ({
       };
     }
 
-    // Hash password
     const hashedPassword = await hashPassword(password);
 
-    // Update user to MEMBER with password
     const updatedUser = await prisma.User.update({
-      where: { phone },
+      where: { phone: user.phone },
       data: {
         password: hashedPassword,
         role: "MEMBER",
@@ -87,15 +74,13 @@ const createMemberAccountService = async ({
       `[Member Auth] User ${user.phone} converted from GUEST to MEMBER`,
     );
 
-    // Generate JWT tokens
     const { accessToken, refreshToken } = generateTokenPair(updatedUser);
 
-    // Save refresh token to database
     await prisma.RefreshToken.create({
       data: {
         token: refreshToken,
         userId: updatedUser.id,
-        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
       },
     });
 
@@ -124,18 +109,9 @@ const createMemberAccountService = async ({
   }
 };
 
-/**
- * Login with phone and password (MEMBER only)
- * Requirements:
- * - User must be MEMBER
- * - Phone number must be valid
- * - Password must match hash
- */
 const loginService = async (phone, password) => {
   try {
     const prisma = getPrisma();
-
-    // Find user by phone
     const user = await prisma.User.findUnique({
       where: { phone },
     });
@@ -147,15 +123,13 @@ const loginService = async (phone, password) => {
       };
     }
 
-    // Check if user is MEMBER
     if (user.role !== "MEMBER") {
       return {
         success: false,
-        error: `User is not a MEMBER. Please verify identity first.`,
+        error: "User is not a MEMBER. Please verify identity first.",
       };
     }
 
-    // Check if password exists
     if (!user.password) {
       return {
         success: false,
@@ -163,7 +137,6 @@ const loginService = async (phone, password) => {
       };
     }
 
-    // Verify password
     const isPasswordValid = await verifyPassword(password, user.password);
     if (!isPasswordValid) {
       return {
@@ -172,7 +145,6 @@ const loginService = async (phone, password) => {
       };
     }
 
-    // Update last login
     await prisma.User.update({
       where: { phone },
       data: {
@@ -180,15 +152,13 @@ const loginService = async (phone, password) => {
       },
     });
 
-    // Generate JWT tokens
     const { accessToken, refreshToken } = generateTokenPair(user);
 
-    // Save refresh token to database
     await prisma.RefreshToken.create({
       data: {
         token: refreshToken,
         userId: user.id,
-        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
       },
     });
 
@@ -216,7 +186,4 @@ const loginService = async (phone, password) => {
   }
 };
 
-module.exports = {
-  createMemberAccountService,
-  loginService,
-};
+export { createMemberAccountService, loginService };

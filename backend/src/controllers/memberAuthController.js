@@ -2,17 +2,17 @@
 // Member Auth Controller - Request Handlers
 // ============================================
 
-const {
+import {
   createMemberAccountService,
   loginService,
-} = require("../services/memberAuthService");
+} from "../services/memberAuthService.js";
 
 /**
  * POST /api/v1/auth/create-account
  * Convert authenticated GUEST user to MEMBER by setting password
  * Body: { password: "securePassword", name: "John Doe", email: "john@example.com" }
  */
-exports.createAccount = async (req, res) => {
+export async function createAccount(req, res) {
   try {
     const { password, name, email } = req.body;
     const userId = req.user?.userId;
@@ -31,7 +31,6 @@ exports.createAccount = async (req, res) => {
       });
     }
 
-    // Validate email format (optional but validate if provided)
     if (email) {
       const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
       if (!emailRegex.test(email)) {
@@ -42,7 +41,6 @@ exports.createAccount = async (req, res) => {
       }
     }
 
-    // Create account
     const result = await createMemberAccountService({
       userId,
       password,
@@ -71,18 +69,17 @@ exports.createAccount = async (req, res) => {
       error: error.message,
     });
   }
-};
+}
 
 /**
  * POST /api/v1/auth/login
  * Login with phone and password (MEMBER only)
  * Body: { phone: "+2348123456789", password: "securePassword" }
  */
-exports.login = async (req, res) => {
+export async function login(req, res) {
   try {
     const { phone, password } = req.body;
 
-    // Validate required fields
     if (!phone || !password) {
       return res.status(400).json({
         success: false,
@@ -90,7 +87,6 @@ exports.login = async (req, res) => {
       });
     }
 
-    // Validate phone format
     const phoneRegex = /^(\+234|0)[789]\d{9}$/;
     if (!phoneRegex.test(phone)) {
       return res.status(400).json({
@@ -100,7 +96,6 @@ exports.login = async (req, res) => {
       });
     }
 
-    // Login
     const result = await loginService(phone, password);
 
     if (!result.success) {
@@ -124,9 +119,4 @@ exports.login = async (req, res) => {
       error: error.message,
     });
   }
-};
-
-module.exports = {
-  createAccount: exports.createAccount,
-  login: exports.login,
-};
+}
