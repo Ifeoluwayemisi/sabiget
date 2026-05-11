@@ -7,6 +7,7 @@ A production-ready Node.js/Express backend for SabiGet - a food delivery platfor
 ## 🚀 Quick Start
 
 ### Prerequisites
+
 - Node.js 22.18+
 - PostgreSQL 12+
 - Paystack account (for payments)
@@ -480,18 +481,19 @@ Automated Actions:
 
 ## ⚡ Rate Limiting
 
-| Endpoint | Limit | Window |
-|----------|-------|--------|
-| POST /auth/send-otp | 3 | 1 hour (per phone) |
+| Endpoint                                                 | Limit    | Window              |
+| -------------------------------------------------------- | -------- | ------------------- |
+| POST /auth/send-otp                                      | 3        | 1 hour (per phone)  |
 | POST /auth/login, /auth/verify-otp, /auth/create-account | 5 failed | 15 minutes (per IP) |
-| POST /orders (checkout) | 10 | 1 hour (per IP) |
-| General API | 100 | 15 minutes (per IP) |
+| POST /orders (checkout)                                  | 10       | 1 hour (per IP)     |
+| General API                                              | 100      | 15 minutes (per IP) |
 
 ---
 
 ## 🗄️ Database Schema Overview
 
 ### User
+
 ```
 id (CUID)
 phone (unique)
@@ -505,6 +507,7 @@ createdAt, updatedAt
 ```
 
 ### Order
+
 ```
 id (CUID)
 userId, vendorId
@@ -518,6 +521,7 @@ createdAt, acceptedAt, preparedAt, deliveredAt, completedAt, cancelledAt, refund
 ```
 
 ### RefreshToken
+
 ```
 id (CUID)
 token (unique)
@@ -531,25 +535,35 @@ createdAt
 ## 🔌 Real-time Socket.io Events
 
 ### Vendor Joins Channel
+
 ```javascript
-socket.emit('vendor:join', vendorId)
-socket.on('connection:success', { vendorId, message: "Connected to vendor notifications" })
+socket.emit("vendor:join", vendorId);
+socket.on("connection:success", {
+  vendorId,
+  message: "Connected to vendor notifications",
+});
 ```
 
 ### New Order Alert
+
 ```javascript
-socket.on('order:new', {
-  orderId, vendorId, status,
-  totalAmount, deliveryAddress, acceptanceDeadline,
+socket.on("order:new", {
+  orderId,
+  vendorId,
+  status,
+  totalAmount,
+  deliveryAddress,
+  acceptanceDeadline,
   customer: { id, name, phone },
-  items: [ { quantity, totalPrice, product: { name } } ]
-})
+  items: [{ quantity, totalPrice, product: { name } }],
+});
 ```
 
 ### Order Status Update
+
 ```javascript
-socket.emit('order:statusUpdate', { vendorId, orderId, status })
-socket.on('order:statusUpdated', { orderId, status })
+socket.emit("order:statusUpdate", { vendorId, orderId, status });
+socket.on("order:statusUpdated", { orderId, status });
 ```
 
 ---
@@ -557,6 +571,7 @@ socket.on('order:statusUpdated', { orderId, status })
 ## ✅ Phase Checklist
 
 ### Phase 1: Stabilization ✅
+
 - [x] JWT payload standardized: `{ userId, role }`
 - [x] Order statuses aligned to Prisma schema
 - [x] Refresh token generation consistent
@@ -565,6 +580,7 @@ socket.on('order:statusUpdated', { orderId, status })
 - [x] README updated with current state
 
 ### Phase 2: Core Transaction Flow ✅
+
 - [x] Paystack webhook: charge.success (UNPAID → PENDING)
 - [x] Paystack webhook: charge.failed (UNPAID → CANCELLED_CUSTOMER)
 - [x] Vendor reject flow with refund handling
@@ -573,6 +589,7 @@ socket.on('order:statusUpdated', { orderId, status })
 - [x] DVC completion: ACCEPTED → OUT_FOR_DELIVERY → DELIVERED → COMPLETED
 
 ### Phase 3: Customer Experience ⏳
+
 - [ ] Nearby vendors endpoint (core logic ready)
 - [ ] Vendor menu endpoint (core logic ready)
 - [ ] Customer order tracking with real-time updates
@@ -580,12 +597,14 @@ socket.on('order:statusUpdated', { orderId, status })
 - [ ] Consistent order detail responses
 
 ### Phase 4: Vendor Operations ⏳
+
 - [ ] Vendor dashboard stats
 - [ ] KYB field validation
 - [ ] Vendor metrics updates from order events
 - [ ] Real-time vendor alerts enhancement
 
 ### Phase 5: Admin Operations ⏳
+
 - [ ] Vendor approval/rejection
 - [ ] Vendor deactivation with audit logs
 - [ ] Order list/detail for investigations
@@ -594,6 +613,7 @@ socket.on('order:statusUpdated', { orderId, status })
 - [ ] Dashboard analytics
 
 ### Phase 6: Reliability ⏳
+
 - [ ] Unit tests for auth services
 - [ ] Integration tests for auth/order/webhook flows
 - [ ] Test: payment failure, OTP expiry, invalid DVC, unauthorized access
@@ -616,21 +636,25 @@ npm run test:coverage             # Coverage report
 ### Common Tasks
 
 **View server logs:**
+
 ```bash
 npm run dev  # With nodemon auto-reload
 ```
 
 **Reset database:**
+
 ```bash
 npx prisma migrate reset  # ⚠️ Caution: Deletes all data!
 ```
 
 **Seed test data:**
+
 ```bash
 npx prisma db seed
 ```
 
 **Check Prisma:**
+
 ```bash
 npx prisma studio  # GUI at http://localhost:5555
 ```
@@ -639,13 +663,13 @@ npx prisma studio  # GUI at http://localhost:5555
 
 ## 🛟 Troubleshooting
 
-| Issue | Solution |
-|-------|----------|
-| JWT token rejected | Ensure `JWT_ACCESS_SECRET` & `JWT_REFRESH_SECRET` set |
-| Paystack returns 401 | Verify `PAYSTACK_SECRET_KEY` is correct |
-| OTP not sending | Check `TERMII_API_KEY` and network connection |
-| Database connection error | Verify `DATABASE_URL` format and PostgreSQL running |
-| Rate limiter blocking | Wait for time window or restart server |
+| Issue                     | Solution                                              |
+| ------------------------- | ----------------------------------------------------- |
+| JWT token rejected        | Ensure `JWT_ACCESS_SECRET` & `JWT_REFRESH_SECRET` set |
+| Paystack returns 401      | Verify `PAYSTACK_SECRET_KEY` is correct               |
+| OTP not sending           | Check `TERMII_API_KEY` and network connection         |
+| Database connection error | Verify `DATABASE_URL` format and PostgreSQL running   |
+| Rate limiter blocking     | Wait for time window or restart server                |
 
 ---
 

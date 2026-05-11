@@ -11,6 +11,7 @@ const {
   triggerOrderRefund,
 } = require("../services/orderService");
 const { generateDVC, generateIdempotencyKey } = require("../utils/generators");
+const { updateLoyaltyPointsOnOrderCompletion } = require("../services/customerService");
 
 function getIdempotencyKey(req) {
   return (
@@ -26,13 +27,8 @@ function getIdempotencyKey(req) {
  */
 router.post("/", checkoutLimiter, authenticateToken, async (req, res) => {
   try {
-    const {
-      vendorId,
-      items,
-      deliveryAddress,
-      deliveryLat,
-      deliveryLng,
-    } = req.body;
+    const { vendorId, items, deliveryAddress, deliveryLat, deliveryLng } =
+      req.body;
     const userId = req.user.userId;
     const idempotencyKey = getIdempotencyKey(req);
 
@@ -75,7 +71,9 @@ router.post("/", checkoutLimiter, authenticateToken, async (req, res) => {
       return res.status(404).json({ success: false, error: "User not found" });
     }
     if (!vendor) {
-      return res.status(404).json({ success: false, error: "Vendor not found" });
+      return res
+        .status(404)
+        .json({ success: false, error: "Vendor not found" });
     }
     if (!vendor.paystackSubcode) {
       return res.status(400).json({
@@ -202,20 +200,24 @@ router.get("/:id", authenticateToken, async (req, res) => {
     });
 
     if (!order) {
-      return res
-        .status(404)
-        .json({ success: false, error: "Order not found" });
+      return res.status(404).json({ success: false, error: "Order not found" });
     }
 
     if (role === "VENDOR") {
-      const vendor = await global.prisma.Vendor.findUnique({ where: { userId } });
+      const vendor = await global.prisma.Vendor.findUnique({
+        where: { userId },
+      });
       if (!vendor || order.vendorId !== vendor.id) {
         return res.status(403).json({
           success: false,
           error: "Not authorized to view this order",
         });
       }
-    } else if (role !== "ADMIN" && role !== "SUPER_ADMIN" && order.userId !== userId) {
+    } else if (
+      role !== "ADMIN" &&
+      role !== "SUPER_ADMIN" &&
+      order.userId !== userId
+    ) {
       return res.status(403).json({
         success: false,
         error: "Not authorized to view this order",
@@ -251,7 +253,9 @@ router.get("/", authenticateToken, async (req, res) => {
     };
 
     if (role === "VENDOR") {
-      const vendor = await global.prisma.Vendor.findUnique({ where: { userId } });
+      const vendor = await global.prisma.Vendor.findUnique({
+        where: { userId },
+      });
       if (!vendor) {
         return res.status(403).json({
           success: false,
@@ -471,7 +475,9 @@ router.post(
       const order = await global.prisma.Order.findUnique({ where: { id } });
 
       if (!vendor || !order || order.vendorId !== vendor.id) {
-        return res.status(403).json({ success: false, error: "Not authorized" });
+        return res
+          .status(403)
+          .json({ success: false, error: "Not authorized" });
       }
 
       if (order.status === "OUT_FOR_DELIVERY") {
@@ -536,7 +542,9 @@ router.post(
       const order = await global.prisma.Order.findUnique({ where: { id } });
 
       if (!vendor || !order || order.vendorId !== vendor.id) {
-        return res.status(403).json({ success: false, error: "Not authorized" });
+        return res
+          .status(403)
+          .json({ success: false, error: "Not authorized" });
       }
 
       if (order.status === "DELIVERED" || order.status === "COMPLETED") {
@@ -646,6 +654,22 @@ router.post(
           success: false,
           error: result.error,
         });
+      }
+
+      // Update loyalty points for customer after order completion
+      try {
+        const pointsResult = await updateLoyaltyPointsOnOrderCompletion(id);
+        if (pointsResult.success) {
+          console.log(
+            `[Order] Loyalty points +${pointsResult.pointsEarned} credited to order ${id}`,
+          );
+        }
+      } catch (pointsError) {
+        console.error(
+          `[Order] Error updating loyalty points for order ${id}:`,
+          pointsError.message,
+        );
+        // Don't fail the request, just log the error
       }
 
       return res.json({

@@ -10,6 +10,13 @@ const {
   findNearbyVendors,
   isValidCoordinates,
 } = require("../utils/location");
+const {
+  redeemLoyaltyPoints,
+  getLoyaltyTier,
+  getPointsEarningRate,
+  getCustomerInsights,
+  getRecommendedVendors,
+} = require("../services/customerService");
 
 function getLoyaltyTier(orderCount) {
   if (orderCount >= 10) {
@@ -347,6 +354,479 @@ router.get("/loyalty-points", authenticateToken, async (req, res) => {
       tier: getLoyaltyTier(user.orderCount),
       earningRate,
       canRedeem: user.role !== "GUEST",
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/v1/customers/order-history
+ * Get customer's order history with filtering
+ */
+router.get("/order-history", authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { status, page = 1, limit = 10 } = req.query;
+
+    const parsedPage = Math.max(parseInt(page, 10) || 1, 1);
+    const parsedLimit = Math.min(Math.max(parseInt(limit, 10) || 10, 1), 50);
+    const skip = (parsedPage - 1) * parsedLimit;
+
+    const where = { userId };
+    if (status) {
+      where.status = status;
+    }
+
+    const [orders, total] = await Promise.all([
+      global.prisma.Order.findMany({
+        where,
+        orderBy: { createdAt: "desc" },
+        skip,
+        take: parsedLimit,
+        include: {
+          vendor: {
+            select: { id: true, name: true, logo: true, averageRating: true },
+          },
+          items: {
+            include: { product: { select: { name: true, price: true } } },
+          },
+          reviews: {
+            select: { id: true, rating: true },
+          },
+        },
+      }),
+      global.prisma.Order.count({ where }),
+    ]);
+
+    const formattedOrders = orders.map((order) => ({
+      id: order.id,
+      status: order.status,
+      totalAmount: order.totalAmount,
+      createdAt: order.createdAt,
+      completedAt: order.completedAt,
+      vendor: order.vendor,
+      itemCount: order.items.length,
+      rating: order.reviews?.[0]?.rating || null,
+      reviewId: order.reviews?.[0]?.id || null,
+    }));
+
+    return res.json({
+      success: true,
+      orders: formattedOrders,
+      pagination: {
+        page: parsedPage,
+        limit: parsedLimit,
+        total,
+        totalPages: Math.ceil(total / parsedLimit),
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * POST /api/v1/customers/orders/:orderId/review
+ * Submit review for completed order
+ */
+router.post("/orders/:orderId/review", authenticateToken, async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const { rating, comment, foodQuality, deliverySpeed, driverBehavior } =
+      req.body;
+    const userId = req.user.userId;
+
+    if (!rating || rating < 1 || rating > 5) {
+      return res.status(400).json({
+        success: false,
+        message: "Rating must be between 1 and 5",
+      });
+    }
+
+    if (comment && comment.length > 500) {
+      return res.status(400).json({
+        success: false,
+        message: "Comment must be 500 characters or less",
+      });
+    }
+
+    const order = await global.prisma.Order.findUnique({
+      where: { id: orderId },
+      include: { vendor: true },
+    });
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found",
+      });
+    }
+
+    if (order.userId !== userId) {
+      return res.status(403).json({
+        success: false,
+        message: "Not authorized to review this order",
+      });
+    }
+
+    if (order.status !== "COMPLETED" && order.status !== "DELIVERED") {
+      return res.status(400).json({
+        success: false,
+        message: "Can only review completed or delivered orders",
+      });
+    }
+
+    // Check if review already exists
+    const existingReview = await global.prisma.Review.findFirst({
+      where: { orderId, userId },
+    });
+
+    if (existingReview) {
+      return res.status(400).json({
+        success: false,
+        message: "You have already reviewed this order",
+      });
+    }
+
+    const review = await global.prisma.Review.create({
+      data: {
+        orderId,
+        userId,
+        vendorId: order.vendorId,
+        rating,
+        comment: comment || null,
+        foodQuality: foodQuality ? Math.max(1, Math.min(5, foodQuality)) : null,
+        deliverySpeed: deliverySpeed
+          ? Math.max(1, Math.min(5, deliverySpeed))
+          : null,
+        driverBehavior: driverBehavior
+          ? Math.max(1, Math.min(5, driverBehavior))
+          : null,
+      },
+    });
+
+    // Update vendor's average rating
+    const vendorReviews = await global.prisma.Review.findMany({
+      where: { vendorId: order.vendorId },
+      select: { rating: true },
+    });
+
+    const averageRating =
+      vendorReviews.length > 0
+        ? (
+            vendorReviews.reduce((sum, r) => sum + r.rating, 0) /
+            vendorReviews.length
+          ).toFixed(1)
+        : 0;
+
+    await global.prisma.Vendor.update({
+      where: { id: order.vendorId },
+      data: {
+        averageRating: parseFloat(averageRating),
+        totalReviews: vendorReviews.length,
+      },
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: "Review submitted successfully",
+      review: {
+        id: review.id,
+        rating: review.rating,
+        comment: review.comment,
+        createdAt: review.createdAt,
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/v1/customers/vendors/:vendorId/reviews
+ * Get all reviews for a vendor
+ */
+router.get("/vendors/:vendorId/reviews", async (req, res) => {
+  try {
+    const { vendorId } = req.params;
+    const { page = 1, limit = 10, sortBy = "recent" } = req.query;
+
+    const parsedPage = Math.max(parseInt(page, 10) || 1, 1);
+    const parsedLimit = Math.min(Math.max(parseInt(limit, 10) || 10, 1), 50);
+    const skip = (parsedPage - 1) * parsedLimit;
+
+    // Verify vendor exists
+    const vendor = await global.prisma.Vendor.findUnique({
+      where: { id: vendorId },
+    });
+
+    if (!vendor) {
+      return res.status(404).json({
+        success: false,
+        message: "Vendor not found",
+      });
+    }
+
+    const orderBy =
+      sortBy === "highest"
+        ? { rating: "desc" }
+        : sortBy === "lowest"
+          ? { rating: "asc" }
+          : { createdAt: "desc" };
+
+    const [reviews, total] = await Promise.all([
+      global.prisma.Review.findMany({
+        where: { vendorId },
+        orderBy,
+        skip,
+        take: parsedLimit,
+        include: {
+          user: { select: { id: true, name: true } },
+        },
+      }),
+      global.prisma.Review.count({ where: { vendorId } }),
+    ]);
+
+    const formattedReviews = reviews.map((review) => ({
+      id: review.id,
+      rating: review.rating,
+      comment: review.comment,
+      foodQuality: review.foodQuality,
+      deliverySpeed: review.deliverySpeed,
+      driverBehavior: review.driverBehavior,
+      user: {
+        id: review.user.id,
+        name: review.user.name,
+      },
+      createdAt: review.createdAt,
+    }));
+
+    // Calculate rating distribution
+    const ratingCounts = {
+      5: 0,
+      4: 0,
+      3: 0,
+      2: 0,
+      1: 0,
+    };
+
+    reviews.forEach((review) => {
+      ratingCounts[review.rating]++;
+    });
+
+    return res.json({
+      success: true,
+      vendor: {
+        id: vendorId,
+        name: vendor.name,
+        averageRating: vendor.averageRating,
+        totalReviews: vendor.totalReviews,
+      },
+      reviews: formattedReviews,
+      ratingDistribution: ratingCounts,
+      pagination: {
+        page: parsedPage,
+        limit: parsedLimit,
+        total,
+        totalPages: Math.ceil(total / parsedLimit),
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/v1/customers/orders/:orderId/review
+ * Get review for a specific order (if exists)
+ */
+router.get("/orders/:orderId/review", authenticateToken, async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const userId = req.user.userId;
+
+    const order = await global.prisma.Order.findUnique({
+      where: { id: orderId },
+    });
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found",
+      });
+    }
+
+    if (order.userId !== userId) {
+      return res.status(403).json({
+        success: false,
+        message: "Not authorized to view this review",
+      });
+    }
+
+    const review = await global.prisma.Review.findFirst({
+      where: { orderId, userId },
+      include: {
+        vendor: { select: { id: true, name: true } },
+      },
+    });
+
+    if (!review) {
+      return res.json({
+        success: true,
+        review: null,
+        message: "No review found for this order",
+      });
+    }
+
+    return res.json({
+      success: true,
+      review: {
+        id: review.id,
+        rating: review.rating,
+        comment: review.comment,
+        foodQuality: review.foodQuality,
+        deliverySpeed: review.deliverySpeed,
+        driverBehavior: review.driverBehavior,
+        vendor: review.vendor,
+        createdAt: review.createdAt,
+        updatedAt: review.updatedAt,
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * POST /api/v1/customers/loyalty-points/redeem
+ * Redeem loyalty points for discount
+ */
+router.post("/loyalty-points/redeem", authenticateToken, async (req, res) => {
+  try {
+    const { pointsToRedeem } = req.body;
+    const userId = req.user.userId;
+
+    if (!pointsToRedeem || pointsToRedeem <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Points to redeem must be greater than 0",
+      });
+    }
+
+    const result = await redeemLoyaltyPoints(userId, pointsToRedeem);
+
+    if (!result.success) {
+      return res.status(400).json({
+        success: false,
+        message: result.error,
+        availablePoints: result.availablePoints,
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: result.message,
+      pointsRedeemed: result.pointsRedeemed,
+      discountNaira: result.discountNaira,
+      remainingPoints: result.remainingPoints,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/v1/customers/insights
+ * Get customer's insights (spend, frequency, preferences)
+ */
+router.get("/insights", authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+
+    const result = await getCustomerInsights(userId);
+
+    if (!result.success) {
+      return res.status(404).json({
+        success: false,
+        message: result.error,
+      });
+    }
+
+    return res.json({
+      success: true,
+      insights: result.insights,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/v1/customers/recommendations
+ * Get personalized vendor recommendations
+ */
+router.get("/recommendations", authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { latitude, longitude, radius = 5 } = req.query;
+
+    if (!latitude || !longitude) {
+      return res.status(400).json({
+        success: false,
+        message: "Latitude and longitude required",
+      });
+    }
+
+    const parsedLatitude = parseFloat(latitude);
+    const parsedLongitude = parseFloat(longitude);
+    const parsedRadius = parseFloat(radius) || 5;
+
+    if (!isValidCoordinates(parsedLatitude, parsedLongitude)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid coordinates",
+      });
+    }
+
+    const result = await getRecommendedVendors(
+      userId,
+      parsedLatitude,
+      parsedLongitude,
+      parsedRadius,
+    );
+
+    if (!result.success) {
+      return res.status(400).json({
+        success: false,
+        message: result.error,
+      });
+    }
+
+    return res.json({
+      success: true,
+      recommendations: result.recommendations,
     });
   } catch (error) {
     return res.status(500).json({
