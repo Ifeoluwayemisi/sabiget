@@ -3,6 +3,7 @@
 Comprehensive testing guide for all Phase 3 customer experience endpoints.
 
 **Prerequisites:**
+
 - Backend running: `npm run dev`
 - Test database seeded with vendors, products, orders
 - Postman or curl installed
@@ -65,17 +66,20 @@ curl -X GET "http://localhost:5000/api/v1/customers/nearby-vendors?latitude=6.52
 ```
 
 **Expected Response:**
+
 - ✅ Status 200
 - ✅ Returns array of vendors with distance sorted (closest first)
 - ✅ Each vendor has: id, name, logo, distanceKm, averageRating, acceptanceRate, estimatedDeliveryMinutes
 
 **Validation:**
+
 - [ ] Vendors within radius only
 - [ ] Sorted by distance ascending
 - [ ] Estimated delivery time calculated
 - [ ] Rating and acceptance rate populated
 
 **Edge Cases:**
+
 ```bash
 # Invalid coordinates
 curl -X GET "http://localhost:5000/api/v1/customers/nearby-vendors?latitude=200&longitude=500" \
@@ -99,17 +103,20 @@ curl -X GET "http://localhost:5000/api/v1/customers/vendors/vendor_123/menu"
 ```
 
 **Expected Response:**
+
 - ✅ Status 200
 - ✅ Vendor info with name, logo
 - ✅ Categories array with products grouped
 - ✅ Each product has: id, name, price, description, image
 
 **Validation:**
+
 - [ ] Products grouped by category
 - [ ] Vendor metrics populated (totalOrders, averageRating, acceptanceRate)
 - [ ] Prices in correct format (kobo/naira)
 
 **Edge Cases:**
+
 ```bash
 # Vendor not found
 curl -X GET "http://localhost:5000/api/v1/customers/vendors/invalid_id/menu"
@@ -137,18 +144,21 @@ curl -X GET "http://localhost:5000/api/v1/customers/order-history?status=COMPLET
 ```
 
 **Expected Response:**
+
 - ✅ Status 200
 - ✅ Orders array sorted by createdAt descending
 - ✅ Pagination metadata: page, limit, total, totalPages
 - ✅ Each order includes: id, status, totalAmount, vendor, itemCount, rating, reviewId
 
 **Validation:**
+
 - [ ] Most recent orders first
 - [ ] Pagination works correctly
 - [ ] Status filter applied
 - [ ] Review status (rating/reviewId) populated if exists
 
 **Edge Cases:**
+
 ```bash
 # Without auth token
 curl -X GET "http://localhost:5000/api/v1/customers/order-history"
@@ -183,12 +193,14 @@ curl -X POST "http://localhost:5000/api/v1/customers/orders/ord_123/review" \
 ```
 
 **Expected Response:**
+
 - ✅ Status 201
 - ✅ Review created with id, rating, comment, createdAt
 - ✅ Vendor averageRating updated
 - ✅ Vendor totalReviews incremented
 
 **Validation:**
+
 - [ ] Rating must be 1-5
 - [ ] Comment max 500 characters
 - [ ] Optional fields (foodQuality, etc) validated 1-5
@@ -249,6 +261,7 @@ curl -X GET "http://localhost:5000/api/v1/customers/vendors/vendor_123/reviews?s
 ```
 
 **Expected Response:**
+
 - ✅ Status 200
 - ✅ Vendor info with name, averageRating, totalReviews
 - ✅ Reviews array with sorting applied
@@ -256,6 +269,7 @@ curl -X GET "http://localhost:5000/api/v1/customers/vendors/vendor_123/reviews?s
 - ✅ Pagination metadata
 
 **Validation:**
+
 - [ ] Sorting applied correctly (recent = createdAt desc, highest = rating desc, etc)
 - [ ] Rating distribution calculated correctly
 - [ ] Sum of distribution equals totalReviews
@@ -263,6 +277,7 @@ curl -X GET "http://localhost:5000/api/v1/customers/vendors/vendor_123/reviews?s
 - [ ] Pagination works
 
 **Edge Cases:**
+
 ```bash
 # Vendor not found
 curl -X GET "http://localhost:5000/api/v1/customers/vendors/invalid/reviews"
@@ -290,16 +305,19 @@ curl -X GET "http://localhost:5000/api/v1/customers/orders/ord_456/review" \
 ```
 
 **Expected Response (with review):**
+
 - ✅ Status 200
 - ✅ Review object with full details (rating, comment, quality metrics)
 - ✅ Vendor info included
 
 **Expected Response (no review):**
+
 - ✅ Status 200
 - ✅ review: null
 - ✅ Message: "No review found for this order"
 
 **Validation:**
+
 - [ ] Authorization: only customer can view their review
 - [ ] Full review details returned if exists
 - [ ] Proper response if no review yet
@@ -316,6 +334,7 @@ curl -X GET "http://localhost:5000/api/v1/customers/loyalty-points" \
 ```
 
 **Expected Response:**
+
 - ✅ Status 200
 - ✅ loyaltyPoints: Current balance
 - ✅ pointsEarned: Total earned lifetime
@@ -325,6 +344,7 @@ curl -X GET "http://localhost:5000/api/v1/customers/loyalty-points" \
 - ✅ nextTier: { name, ordersNeeded, ordersCompleted }
 
 **Validation:**
+
 - [ ] Tier matches orderCount (STANDARD: <4, LOYAL: 4-9, PLATINUM: 10+)
 - [ ] Earning rate correct based on orderCount
 - [ ] Points calculations correct
@@ -344,6 +364,7 @@ curl -X POST "http://localhost:5000/api/v1/customers/loyalty-points/redeem" \
 ```
 
 **Expected Response:**
+
 - ✅ Status 200
 - ✅ Message: "Redeemed X points for ₦Y discount"
 - ✅ pointsRedeemed: X
@@ -351,6 +372,7 @@ curl -X POST "http://localhost:5000/api/v1/customers/loyalty-points/redeem" \
 - ✅ remainingPoints: Updated balance
 
 **Validation:**
+
 - [ ] Minimum 50 points required
 - [ ] User has sufficient points
 - [ ] Points deducted from balance
@@ -387,6 +409,7 @@ curl -X GET "http://localhost:5000/api/v1/customers/insights" \
 ```
 
 **Expected Response:**
+
 - ✅ Status 200
 - ✅ insights object with:
   - totalOrders: Count of completed orders
@@ -399,6 +422,7 @@ curl -X GET "http://localhost:5000/api/v1/customers/insights" \
   - pointsBalance: Current loyalty points
 
 **Validation:**
+
 - [ ] Calculations correct (especially avgOrderValue)
 - [ ] 30-day window working correctly
 - [ ] Favorite vendor is most frequently ordered
@@ -416,11 +440,13 @@ curl -X GET "http://localhost:5000/api/v1/customers/recommendations?latitude=6.5
 ```
 
 **Expected Response:**
+
 - ✅ Status 200
 - ✅ recommendations array with up to 5 vendors
 - ✅ Each includes: id, name, logo, distanceKm, rating, isFavorite, reason
 
 **Validation:**
+
 - [ ] Favorite vendors prioritized first (isFavorite: true)
 - [ ] Then sorted by rating
 - [ ] Within specified radius
@@ -463,12 +489,14 @@ curl -X POST "http://localhost:5000/api/v1/customers/create-account" \
 ```
 
 **Expected Response:**
+
 - ✅ Status 200
 - ✅ User converted from GUEST to MEMBER
 - ✅ New accessToken and refreshToken issued
 - ✅ User object with updated role: "MEMBER"
 
 **Validation:**
+
 - [ ] Password required and stored securely (hashed)
 - [ ] Email validation
 - [ ] Name updated
@@ -542,11 +570,13 @@ POST /api/v1/customers/orders/other_users_order/review \
 ## 📊 Loyalty Points Validation
 
 **Points Calculation:**
+
 - First 3 orders: 5% of food cost
 - After 3 orders: 2% of food cost
 - Conversion: 100 points = ₦100 (1:1 ratio)
 
 **Example:**
+
 ```
 Order 1: ₦3000 food cost × 5% = 150 points
 Order 2: ₦2500 food cost × 5% = 125 points
@@ -564,14 +594,17 @@ Earning Rate: 2% (after 3 orders)
 ## 🐛 Known Issues & Workarounds
 
 ### Issue 1: Loyalty Points Not Updating
+
 **Cause:** Order completion webhook not firing
 **Workaround:** Manually trigger via admin endpoint or test database
 
 ### Issue 2: Vendor Rating Calculation Incorrect
+
 **Cause:** Floating point precision
 **Solution:** Use .toFixed(1) for display, actual value in DB
 
 ### Issue 3: Location Validation Too Strict
+
 **Cause:** Haversine formula expects valid coordinates
 **Fix:** Use test coordinates: lat 6.5244, lng 3.3792 (Lagos, Nigeria)
 
