@@ -707,10 +707,10 @@ router.post("/loyalty-points/redeem", authenticateToken, async (req, res) => {
     const { pointsToRedeem } = req.body;
     const userId = req.user.userId;
 
-    if (!pointsToRedeem || pointsToRedeem <= 0) {
+    if (!pointsToRedeem || pointsToRedeem <= 0 || pointsToRedeem < 100) {
       return res.status(400).json({
         success: false,
-        message: "Points to redeem must be greater than 0",
+        message: "Minimum 100 points required (₦50 discount)",
       });
     }
 

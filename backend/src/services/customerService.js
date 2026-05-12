@@ -73,11 +73,12 @@ const redeemLoyaltyPoints = async (userId, pointsToRedeem) => {
     if (pointsToRedeem < 100) {
       return {
         success: false,
-        error: "Minimum 100 points required for redemption",
+        error: "Minimum 100 points required for redemption (₦50)",
       };
     }
 
-    const discountAmount = pointsToRedeem;
+    // 100 points = ₦50 (0.5 naira per point)
+    const discountAmount = pointsToRedeem * 0.5;
 
     const updatedUser = await getPrisma().User.update({
       where: { id: userId },
@@ -93,9 +94,9 @@ const redeemLoyaltyPoints = async (userId, pointsToRedeem) => {
 
     return {
       success: true,
-      message: `Redeemed ${pointsToRedeem} points for N${discountAmount / 100} discount`,
+      message: `Redeemed ${pointsToRedeem} points for ₦${discountAmount} discount`,
       pointsRedeemed: pointsToRedeem,
-      discountNaira: discountAmount / 100,
+      discountNaira: discountAmount,
       remainingPoints: updatedUser.loyaltyPoints,
     };
   } catch (error) {
@@ -134,7 +135,10 @@ const getCustomerInsights = async (userId) => {
       return { success: false, error: "User not found" };
     }
 
-    const totalSpent = user.orders.reduce((sum, order) => sum + order.totalAmount, 0);
+    const totalSpent = user.orders.reduce(
+      (sum, order) => sum + order.totalAmount,
+      0,
+    );
     const avgOrderValue =
       user.orders.length > 0 ? totalSpent / user.orders.length : 0;
 
@@ -198,10 +202,9 @@ const getRecommendedVendors = async (
       return { success: false, error: "User not found" };
     }
 
-    const favoriteVendorIds = [...new Set(user.orders.map((order) => order.vendorId))].slice(
-      0,
-      3,
-    );
+    const favoriteVendorIds = [
+      ...new Set(user.orders.map((order) => order.vendorId)),
+    ].slice(0, 3);
 
     if (!isValidCoordinates(latitude, longitude)) {
       return { success: false, error: "Invalid coordinates" };
@@ -227,10 +230,16 @@ const getRecommendedVendors = async (
       }))
       .filter((vendor) => vendor.distance <= radius)
       .sort((a, b) => {
-        if (favoriteVendorIds.includes(a.id) && !favoriteVendorIds.includes(b.id)) {
+        if (
+          favoriteVendorIds.includes(a.id) &&
+          !favoriteVendorIds.includes(b.id)
+        ) {
           return -1;
         }
-        if (!favoriteVendorIds.includes(a.id) && favoriteVendorIds.includes(b.id)) {
+        if (
+          !favoriteVendorIds.includes(a.id) &&
+          favoriteVendorIds.includes(b.id)
+        ) {
           return 1;
         }
         return (b.averageRating || 0) - (a.averageRating || 0);

@@ -2,6 +2,7 @@
 import express from "express";
 import * as authController from "../controllers/authController.js";
 import * as memberAuthController from "../controllers/memberAuthController.js";
+import * as vendorAuthController from "../controllers/vendorAuthController.js";
 import { otpLimiter, loginLimiter } from "../middleware/rateLimiter.js";
 import { authenticateToken } from "../middleware/auth.js";
 
@@ -96,5 +97,25 @@ router.get("/me", authenticateToken, async (req, res) => {
     });
   }
 });
+
+/**
+ * ============================================
+ * VENDOR AUTHENTICATION ROUTES
+ * ============================================
+ */
+
+/**
+ * POST /api/v1/auth/vendor/signup
+ * Register as vendor with business details
+ * Body: { email, password, businessName, businessPhone, businessCategory }
+ */
+router.post("/vendor/signup", loginLimiter, vendorAuthController.vendorSignup);
+
+/**
+ * POST /api/v1/auth/vendor/login
+ * Vendor login with email and password
+ * Body: { email, password }
+ */
+router.post("/vendor/login", loginLimiter, vendorAuthController.vendorLogin);
 
 export default router;

@@ -42,17 +42,28 @@ http://localhost:5000/api/v1
 
 ## 🔐 Authentication Flow (For Frontend)
 
-### 1. Send OTP
+### USER TYPES:
+
+- **GUEST**: Browse and checkout with OTP only (no password)
+- **MEMBER**: Guest → Member conversion (add password post-order)
+- **VENDOR**: Separate portal (vendor.sabiget.com) with 2FA
+- **ADMIN**: Hidden URL with 2FA
+
+---
+
+### CUSTOMER FLOW (Landing Page Users)
+
+#### 1. **Send OTP** (No auth required)
 
 ```javascript
 POST /auth/send-otp
 {
   "phone": "+2348123456789"
 }
-Response: { "success": true }
+Response: { "success": true, "message": "OTP sent" }
 ```
 
-### 2. Verify OTP & Get Token
+#### 2. **Verify OTP & Get Token** (Creates GUEST user on first time)
 
 ```javascript
 POST /auth/verify-otp
@@ -61,16 +72,172 @@ POST /auth/verify-otp
   "code": "123456"  // From SMS/WhatsApp
 }
 Response: {
+  "success": true,
   "accessToken": "eyJhbGc...",
   "refreshToken": "...",
-  "user": { "id": "...", "phone": "...", "role": "GUEST" }
+  "user": {
+    "id": "user_123",
+    "phone": "+2348123456789",
+    "role": "GUEST",
+    "isVerified": false
+  },
+  "isNewUser": true
 }
 ```
 
-### 3. Use Token in Requests
+#### 3. **Use Token in Requests**
 
 ```javascript
 Authorization: Bearer {accessToken}
+```
+
+#### 4. **Guest Checkout** (No password needed initially)
+
+```javascript
+POST /orders/guest-checkout
+{
+  "phone": "+2348123456789",
+  "vendorId": "vendor_123",
+  "items": [
+    { "productId": "prod_1", "quantity": 2, "specialRequests": "Extra spice" }
+  ],
+  "deliveryAddress": "123 Main Street, Lagos",
+  "deliveryLat": 6.5244,
+  "deliveryLng": 3.3792
+}
+Response: {
+  "success": true,
+  "orderId": "order_123",
+  "totalAmount": 5500,
+  "authorizationUrl": "https://checkout.paystack.com/...",
+  "nextStep": "Complete payment and verify OTP"
+}
+```
+
+#### 5. **Convert to MEMBER** (Post-order - optional)
+
+```javascript
+POST /auth/create-account
+Headers: { Authorization: "Bearer accessToken" }
+{
+  "password": "securePass123",
+  "name": "John Doe",
+  "email": "john@example.com"
+}
+Response: {
+  "success": true,
+  "message": "Account upgraded to MEMBER",
+  "user": { "role": "MEMBER", "email": "john@example.com" }
+}
+```
+
+#### 6. **Member Login** (After password set)
+
+```javascript
+POST /auth/login
+{
+  "phone": "+2348123456789",
+  "password": "securePass123"
+}
+Response: {
+  "accessToken": "...",
+  "refreshToken": "...",
+  "user": { "role": "MEMBER" }
+}
+```
+
+---
+
+### VENDOR FLOW (Separate Portal - vendor.sabiget.com)
+
+#### 1. **Vendor Signup** (New business owner)
+
+```javascript
+POST /auth/vendor/signup
+{
+  "email": "vendor@restaurant.com",
+  "password": "securePass123",
+  "businessName": "Pizza Palace",
+  "businessPhone": "+2348012345678",
+  "businessCategory": "Food & Beverage"
+}
+Response: {
+  "success": true,
+  "vendor": { "vendorId": "vendor_123" },
+  "nextStep": "Setup 2FA at /auth/vendor/setup-2fa"
+}
+```
+
+#### 2. **Vendor Setup 2FA** (Two-factor authentication)
+
+```javascript
+POST /auth/vendor/setup-2fa
+Headers: { Authorization: "Bearer accessToken" }
+{
+  "method": "email"  // or "sms"
+}
+Response: {
+  "success": true,
+  "message": "2FA code sent via email",
+  "expiresIn": "10 minutes"
+}
+```
+
+#### 3. **Vendor Verify 2FA**
+
+```javascript
+POST /auth/vendor/verify-2fa
+Headers: { Authorization: "Bearer accessToken" }
+{
+  "code": "482917"
+}
+Response: {
+  "success": true,
+  "vendor": { "isApproved": false },
+  "nextStep": "Awaiting admin approval or access dashboard if approved"
+}
+```
+
+#### 4. **Vendor Login** (Subsequent logins)
+
+```javascript
+POST /auth/vendor/login
+{
+  "email": "vendor@restaurant.com",
+  "password": "securePass123"
+}
+Response: {
+  "accessToken": "...",
+  "refreshToken": "...",
+  "vendor": { "vendorId": "vendor_123", "isApproved": true }
+}
+```
+
+---
+
+### LOYALTY POINTS SYSTEM
+
+**Earning:**
+
+- First 3 orders: 5% of order value = points
+- After 3 orders: 2% of order value = points
+
+**Redemption:**
+
+- Minimum: 100 points = ₦50 discount (0.5 naira per point)
+- Example: 200 points = ₦100 discount
+
+```javascript
+POST /customers/redeem-loyalty-points
+Headers: { Authorization: "Bearer accessToken" }
+{
+  "pointsToRedeem": 150
+}
+Response: {
+  "success": true,
+  "discountNaira": 75,  // 150 * 0.5
+  "remainingPoints": 50
+}
 ```
 
 ---

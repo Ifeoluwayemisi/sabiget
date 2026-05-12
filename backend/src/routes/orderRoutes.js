@@ -11,9 +11,7 @@ import {
   triggerOrderRefund,
 } from "../services/orderService.js";
 import { generateDVC, generateIdempotencyKey } from "../utils/generators.js";
-import {
-  updateLoyaltyPointsOnOrderCompletion,
-} from "../services/customerService.js";
+import { updateLoyaltyPointsOnOrderCompletion } from "../services/customerService.js";
 
 const router = express.Router();
 function getIdempotencyKey(req) {
@@ -23,6 +21,175 @@ function getIdempotencyKey(req) {
     generateIdempotencyKey()
   );
 }
+
+/**
+ * POST /api/orders/guest-checkout
+ * Create order as anonymous GUEST (no authentication needed)
+ * Body: { phone, vendorId, items, deliveryAddress, deliveryLat, deliveryLng }
+ * MUST BE DEFINED BEFORE THE ROOT "/" ROUTE
+ */
+router.post("/guest-checkout", checkoutLimiter, async (req, res) => {
+  try {
+    const {
+      phone,
+      vendorId,
+      items,
+      deliveryAddress,
+      deliveryLat,
+      deliveryLng,
+    } = req.body;
+
+    if (!phone) {
+      return res.status(400).json({
+        success: false,
+        error: "Phone number required for guest checkout",
+      });
+    }
+
+    if (!vendorId || !items || !items.length || !deliveryAddress) {
+      return res.status(400).json({
+        success: false,
+        error: "Vendor ID, items, and delivery address required",
+      });
+    }
+
+    const phoneRegex = /^(\+234|0)[789]\d{9}$/;
+    if (!phoneRegex.test(phone)) {
+      return res.status(400).json({
+        success: false,
+        error: "Invalid Nigerian phone number",
+        example: "+2348123456789",
+      });
+    }
+
+    // Find or create GUEST user with this phone
+    let user = await global.prisma.User.findUnique({ where: { phone } });
+
+    if (!user) {
+      user = await global.prisma.User.create({
+        data: {
+          phone,
+          role: "GUEST",
+          isVerified: false,
+        },
+      });
+    } else if (user.role !== "GUEST" && user.role !== "MEMBER") {
+      return res.status(403).json({
+        success: false,
+        error: "This phone is registered as a vendor account",
+      });
+    }
+
+    const vendor = await global.prisma.Vendor.findUnique({
+      where: { id: vendorId },
+    });
+
+    if (!vendor) {
+      return res
+        .status(404)
+        .json({ success: false, error: "Vendor not found" });
+    }
+
+    if (!vendor.paystackSubcode) {
+      return res.status(400).json({
+        success: false,
+        error: "Vendor is not configured to receive payments yet.",
+      });
+    }
+
+    let foodCost = 0;
+    const orderItemsData = [];
+
+    for (const item of items) {
+      const product = await global.prisma.Product.findUnique({
+        where: { id: item.productId },
+      });
+      if (!product || product.vendorId !== vendor.id || !product.isAvailable) {
+        return res.status(400).json({
+          success: false,
+          error: `Product ${item.productId} is invalid or unavailable`,
+        });
+      }
+
+      const totalPrice = product.price * item.quantity;
+      foodCost += totalPrice;
+
+      orderItemsData.push({
+        productId: product.id,
+        quantity: item.quantity,
+        pricePerUnit: product.price,
+        totalPrice,
+        specialRequests: item.specialRequests || null,
+      });
+    }
+
+    const serviceFee = 500;
+    const platformFee = 0;
+    const totalAmount = foodCost + serviceFee + platformFee;
+    const paymentReference = `SG-ORD-${Date.now()}-${generateIdempotencyKey()}`;
+    const idempotencyKey = generateIdempotencyKey();
+
+    const order = await global.prisma.Order.create({
+      data: {
+        userId: user.id,
+        vendorId,
+        status: "UNPAID",
+        foodCost,
+        serviceFee,
+        platformFee,
+        totalAmount,
+        paymentReference,
+        idempotencyKey,
+        deliveryAddress,
+        deliveryLat: parseFloat(deliveryLat) || 0,
+        deliveryLng: parseFloat(deliveryLng) || 0,
+        items: {
+          create: orderItemsData,
+        },
+      },
+    });
+
+    const paystackRes = await initializePayment({
+      email: user.email || `guest+${phone}@sabiget.com`,
+      amount: totalAmount,
+      reference: paymentReference,
+      callbackUrl: "https://sabiget.com/payment-callback",
+      subaccount: vendor.paystackSubcode,
+      transaction_charge: serviceFee,
+      metadata: {
+        orderId: order.id,
+        vendorId: vendor.id,
+        userId: user.id,
+        isGuest: true,
+      },
+    });
+
+    if (!paystackRes.status) {
+      return res.status(400).json({
+        success: false,
+        error: "Payment initialization failed",
+        details: paystackRes.message,
+      });
+    }
+
+    return res.status(201).json({
+      success: true,
+      message:
+        "Guest order created. Please verify your phone to complete payment.",
+      orderId: order.id,
+      authorizationUrl: paystackRes.data.authorization_url,
+      paystackAccessCode: paystackRes.data.access_code,
+      reference: paymentReference,
+      expiresIn: "1 hour",
+      nextStep: "Verify OTP at /auth/send-otp",
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
 
 /**
  * POST /api/orders
@@ -766,6 +933,174 @@ router.post("/:id/cancel", authenticateToken, async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * POST /api/orders/guest-checkout
+ * Create order as anonymous GUEST (no authentication needed)
+ * Body: { phone, vendorId, items, deliveryAddress, deliveryLat, deliveryLng }
+ */
+router.post("/guest-checkout", checkoutLimiter, async (req, res) => {
+  try {
+    const {
+      phone,
+      vendorId,
+      items,
+      deliveryAddress,
+      deliveryLat,
+      deliveryLng,
+    } = req.body;
+
+    if (!phone) {
+      return res.status(400).json({
+        success: false,
+        error: "Phone number required for guest checkout",
+      });
+    }
+
+    if (!vendorId || !items || !items.length || !deliveryAddress) {
+      return res.status(400).json({
+        success: false,
+        error: "Vendor ID, items, and delivery address required",
+      });
+    }
+
+    const phoneRegex = /^(\+234|0)[789]\d{9}$/;
+    if (!phoneRegex.test(phone)) {
+      return res.status(400).json({
+        success: false,
+        error: "Invalid Nigerian phone number",
+        example: "+2348123456789",
+      });
+    }
+
+    // Find or create GUEST user with this phone
+    let user = await global.prisma.User.findUnique({ where: { phone } });
+
+    if (!user) {
+      user = await global.prisma.User.create({
+        data: {
+          phone,
+          role: "GUEST",
+          isVerified: false,
+        },
+      });
+    } else if (user.role !== "GUEST" && user.role !== "MEMBER") {
+      return res.status(403).json({
+        success: false,
+        error: "This phone is registered as a vendor account",
+      });
+    }
+
+    const vendor = await global.prisma.Vendor.findUnique({
+      where: { id: vendorId },
+    });
+
+    if (!vendor) {
+      return res
+        .status(404)
+        .json({ success: false, error: "Vendor not found" });
+    }
+
+    if (!vendor.paystackSubcode) {
+      return res.status(400).json({
+        success: false,
+        error: "Vendor is not configured to receive payments yet.",
+      });
+    }
+
+    let foodCost = 0;
+    const orderItemsData = [];
+
+    for (const item of items) {
+      const product = await global.prisma.Product.findUnique({
+        where: { id: item.productId },
+      });
+      if (!product || product.vendorId !== vendor.id || !product.isAvailable) {
+        return res.status(400).json({
+          success: false,
+          error: `Product ${item.productId} is invalid or unavailable`,
+        });
+      }
+
+      const totalPrice = product.price * item.quantity;
+      foodCost += totalPrice;
+
+      orderItemsData.push({
+        productId: product.id,
+        quantity: item.quantity,
+        pricePerUnit: product.price,
+        totalPrice,
+        specialRequests: item.specialRequests || null,
+      });
+    }
+
+    const serviceFee = 500;
+    const platformFee = 0;
+    const totalAmount = foodCost + serviceFee + platformFee;
+    const paymentReference = `SG-ORD-${Date.now()}-${generateIdempotencyKey()}`;
+    const idempotencyKey = generateIdempotencyKey();
+
+    const order = await global.prisma.Order.create({
+      data: {
+        userId: user.id,
+        vendorId,
+        status: "UNPAID",
+        foodCost,
+        serviceFee,
+        platformFee,
+        totalAmount,
+        paymentReference,
+        idempotencyKey,
+        deliveryAddress,
+        deliveryLat: parseFloat(deliveryLat) || 0,
+        deliveryLng: parseFloat(deliveryLng) || 0,
+        items: {
+          create: orderItemsData,
+        },
+      },
+    });
+
+    const paystackRes = await initializePayment({
+      email: user.email || `guest+${phone}@sabiget.com`,
+      amount: totalAmount,
+      reference: paymentReference,
+      callbackUrl: "https://sabiget.com/payment-callback",
+      subaccount: vendor.paystackSubcode,
+      transaction_charge: serviceFee,
+      metadata: {
+        orderId: order.id,
+        vendorId: vendor.id,
+        userId: user.id,
+        isGuest: true,
+      },
+    });
+
+    if (!paystackRes.status) {
+      return res.status(400).json({
+        success: false,
+        error: "Payment initialization failed",
+        details: paystackRes.message,
+      });
+    }
+
+    return res.status(201).json({
+      success: true,
+      message:
+        "Guest order created. Please verify your phone to complete payment.",
+      orderId: order.id,
+      authorizationUrl: paystackRes.data.authorization_url,
+      paystackAccessCode: paystackRes.data.access_code,
+      reference: paymentReference,
+      expiresIn: "1 hour",
+      nextStep: "Verify OTP at /auth/send-otp",
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: error.message,
+    });
   }
 });
 
