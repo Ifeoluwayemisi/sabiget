@@ -1,59 +1,218 @@
 "use client";
 
-import Image from "next/image";
-import { useEffect, useMemo, useState } from "react";
+import { useState } from "react";
+import { motion } from "framer-motion";
+import { Hero, HowItWorks, AuthModal, VendorCard, Footer } from "./components";
 
-type LocationState = "permission" | "loading" | "detected" | "empty" | "error";
-
-type VendorCard = {
-  id: string;
-  name: string;
-  logo?: string | null;
-  distanceKm?: number | string;
-  estimatedDeliveryMinutes?: number;
-  averageRating?: number;
-  totalReviews?: number;
-  tags?: string[];
-  isClosed?: boolean;
-  ratingLabel?: string;
-  statusLabel?: string;
-};
-
-const mobileNavItems = [
-  { label: "Home", icon: "⌂" },
-  { label: "Discover", icon: "◌" },
-  { label: "Orders", icon: "◎", badge: true },
-  { label: "Profile", icon: "◐" },
-];
-
-const trustSteps = [
+const sampleVendors = [
   {
-    title: "Order",
-    description: "Pay securely with a trusted checkout flow built for fast local orders.",
-    icon: "01",
-  },
-  {
-    title: "Verify",
-    description: "Every delivery ends with a unique 6-character DVC before it counts as complete.",
-    icon: "02",
-  },
-  {
-    title: "Eat",
-    description: "Get your food confidently, with real-time tracking and proof of safe handoff.",
-    icon: "03",
-  },
-];
-
-const nearbyCards: VendorCard[] = [
-  {
-    id: "demo-1",
     name: "Buka & Flame",
-    estimatedDeliveryMinutes: 40,
-    distanceKm: "1.2",
-    tags: ["Jollof", "Swallow", "Breakfast"],
-    ratingLabel: "Top Rated",
-    statusLabel: "Open now",
+    image: "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=400&h=250&fit=crop",
+    rating: 4.8,
+    reviews: 256,
+    distance: "1.2 km",
+    deliveryTime: "40 mins",
+    category: "Jollof",
   },
+  {
+    name: "Pepper Pot Express",
+    image: "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=400&h=250&fit=crop",
+    rating: 4.6,
+    reviews: 189,
+    distance: "2.4 km",
+    deliveryTime: "35 mins",
+    category: "Soups",
+  },
+  {
+    name: "Morning Chop Spot",
+    image: "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=400&h=250&fit=crop",
+    rating: 4.9,
+    reviews: 342,
+    distance: "0.9 km",
+    deliveryTime: "25 mins",
+    category: "Breakfast",
+  },
+  {
+    name: "Midnight Grill Cart",
+    image: "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=400&h=250&fit=crop",
+    rating: 4.5,
+    reviews: 127,
+    distance: "3.1 km",
+    deliveryTime: "45 mins",
+    category: "Grill",
+  },
+];
+
+export default function Home() {
+  const [isAuthOpen, setIsAuthOpen] = useState(false);
+
+  return (
+    <>
+      {/* Navigation */}
+      <motion.nav
+        className="sticky top-0 z-40 bg-white border-b border-gray-100 backdrop-blur-md bg-white/80"
+        initial={{ y: -100 }}
+        animate={{ y: 0 }}
+        transition={{ duration: 0.5 }}
+      >
+        <div className="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
+          {/* Logo */}
+          <div className="flex items-center gap-2">
+            <span className="text-3xl">🍽️</span>
+            <span className="font-black text-2xl text-gray-900">SabiGet</span>
+          </div>
+
+          {/* CTA */}
+          <motion.button
+            onClick={() => setIsAuthOpen(true)}
+            className="px-6 py-2 bg-gradient-to-r from-orange-500 to-amber-600 text-white font-bold rounded-lg hover:shadow-lg transition-all duration-300"
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+          >
+            Sign In
+          </motion.button>
+        </div>
+      </motion.nav>
+
+      {/* Hero Section */}
+      <Hero onGetStarted={() => setIsAuthOpen(true)} />
+
+      {/* Nearby Vendors Section */}
+      <section className="py-20 px-4 bg-gray-50">
+        <motion.div
+          className="max-w-6xl mx-auto"
+          initial={{ opacity: 0 }}
+          whileInView={{ opacity: 1 }}
+          viewport={{ once: true }}
+          transition={{ duration: 0.6 }}
+        >
+          {/* Section Header */}
+          <motion.div
+            className="mb-12"
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.6 }}
+          >
+            <h2 className="text-4xl md:text-5xl font-bold text-gray-900 mb-4">
+              Featured Vendors Near You
+            </h2>
+            <p className="text-xl text-gray-600">
+              Browse top-rated local vendors and get your favorite meals delivered fast
+            </p>
+          </motion.div>
+
+          {/* Vendor Grid */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+            {sampleVendors.map((vendor, idx) => (
+              <motion.div
+                key={vendor.name}
+                initial={{ opacity: 0, y: 20 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+                transition={{ delay: idx * 0.1, duration: 0.5 }}
+              >
+                <VendorCard {...vendor} />
+              </motion.div>
+            ))}
+          </div>
+
+          {/* CTA */}
+          <motion.div
+            className="mt-12 text-center"
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.6, delay: 0.3 }}
+          >
+            <motion.button
+              onClick={() => setIsAuthOpen(true)}
+              className="px-8 py-4 bg-orange-500 text-white font-bold rounded-lg hover:bg-orange-600 transform hover:scale-105 transition-all duration-300"
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+            >
+              Browse All Vendors →
+            </motion.button>
+          </motion.div>
+        </motion.div>
+      </section>
+
+      {/* How It Works Section */}
+      <HowItWorks />
+
+      {/* CTA Section */}
+      <section className="py-20 px-4 bg-gradient-to-r from-orange-500 to-amber-600 relative overflow-hidden">
+        <div className="max-w-4xl mx-auto text-center relative z-10">
+          <motion.h2
+            className="text-4xl md:text-5xl font-bold text-white mb-6"
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.6 }}
+          >
+            Ready to Order?
+          </motion.h2>
+          <motion.p
+            className="text-xl text-white/90 mb-8"
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.6, delay: 0.1 }}
+          >
+            Sign in with just your phone number. No password needed. 
+            Browse vendors, order securely, and verify every delivery.
+          </motion.p>
+          <motion.div
+            className="flex flex-col sm:flex-row gap-4 justify-center"
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.6, delay: 0.2 }}
+          >
+            <motion.button
+              onClick={() => setIsAuthOpen(true)}
+              className="px-8 py-4 bg-white text-orange-600 font-bold rounded-lg hover:bg-gray-100 transform hover:scale-105 transition-all duration-300 text-lg"
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+            >
+              🚀 Get Started
+            </motion.button>
+            <motion.button
+              className="px-8 py-4 bg-white/20 text-white font-bold border-2 border-white rounded-lg hover:bg-white/30 transform hover:scale-105 transition-all duration-300 text-lg backdrop-blur-sm"
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+            >
+              Learn More
+            </motion.button>
+          </motion.div>
+        </div>
+      </section>
+
+      {/* Footer */}
+      <Footer />
+
+      {/* Auth Modal */}
+      <AuthModal isOpen={isAuthOpen} onClose={() => setIsAuthOpen(false)} />
+    </>
+  );
+}
+            animation: blob 7s infinite;
+          }
+
+          .animation-delay-2000 {
+            animation-delay: 2s;
+          }
+        `}</style>
+      </section>
+
+      {/* Footer */}
+      <Footer />
+
+      {/* Auth Modal */}
+      <AuthModal isOpen={isAuthOpen} onClose={() => setIsAuthOpen(false)} />
+    </>
+  );
+}
   {
     id: "demo-2",
     name: "Pepper Pot Express",
