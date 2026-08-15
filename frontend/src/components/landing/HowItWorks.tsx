@@ -60,7 +60,6 @@ export default function HowItWorks() {
         whileInView="visible"
         viewport={{ once: true }}
       >
-        {/* Section Header */}
         <motion.div variants={itemVariants} className="text-center mb-16">
           <h2 className="text-4xl md:text-5xl font-bold text-gray-900 mb-4">
             How Sabiget Works
@@ -71,7 +70,6 @@ export default function HowItWorks() {
           </p>
         </motion.div>
 
-        {/* Steps Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
           {steps.map((step, index) => {
             const Icon = step.icon;
@@ -82,21 +80,18 @@ export default function HowItWorks() {
                 className="flex flex-col items-center text-center p-6 rounded-lg hover:bg-orange-50 transition-colors"
                 whileHover={{ y: -5 }}
               >
-                {/* Icon Container */}
                 <motion.div
-                  className="w-16 h-16 bg-gradient-to-br from-orange-400 to-orange-600 rounded-full flex items-center justify-center mb-4 shadow-lg"
+                  className="w-16 h-16 bg-linear-to-br from-orange-400 to-orange-600 rounded-full flex items-center justify-center mb-4 shadow-lg"
                   whileHover={{ scale: 1.1, rotate: 10 }}
                   transition={{ type: "spring", stiffness: 300 }}
                 >
                   <Icon className="w-8 h-8 text-white" />
                 </motion.div>
 
-                {/* Step Number */}
                 <div className="absolute -top-3 -right-3 w-8 h-8 bg-orange-500 text-white rounded-full flex items-center justify-center font-bold text-sm">
                   {index + 1}
                 </div>
 
-                {/* Content */}
                 <h3 className="text-xl font-bold text-gray-900 mb-2">
                   {step.title}
                 </h3>
@@ -106,7 +101,6 @@ export default function HowItWorks() {
           })}
         </div>
 
-        {/* Timeline Connector (mobile) */}
         <motion.div
           className="mt-16 flex justify-center md:hidden"
           initial={{ scaleY: 0 }}
@@ -114,7 +108,7 @@ export default function HowItWorks() {
           transition={{ duration: 1, delay: 0.5 }}
           viewport={{ once: true }}
         >
-          <div className="w-1 h-16 bg-gradient-to-b from-orange-400 to-transparent rounded-full" />
+          <div className="w-1 h-16 bg-linear-to-b from-orange-400 to-transparent rounded-full" />
         </motion.div>
       </motion.div>
     </section>

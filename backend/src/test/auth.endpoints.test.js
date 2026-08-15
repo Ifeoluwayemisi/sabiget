@@ -8,6 +8,10 @@ const createMemberAccountService = jest.fn();
 const loginService = jest.fn();
 const verifyRefreshToken = jest.fn();
 const generateAccessToken = jest.fn(() => "new_access_token");
+const generateTokenPair = jest.fn(() => ({
+  accessToken: "new_access_token",
+  refreshToken: "new_refresh_token",
+}));
 
 await jest.unstable_mockModule("../middleware/auth.js", () => ({
   authenticateToken: (req, res, next) => {
@@ -34,6 +38,7 @@ await jest.unstable_mockModule("../services/memberAuthService.js", () => ({
 await jest.unstable_mockModule("../utils/jwt.js", () => ({
   verifyRefreshToken,
   generateAccessToken,
+  generateTokenPair,
 }));
 
 const { startTestServer } = await import("./startTestServer.js");

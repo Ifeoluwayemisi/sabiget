@@ -1,10 +1,10 @@
 // Vendor Auth Controller - Vendor-specific authentication (signup, login)
-import bcrypt from "bcryptjs";
-import jwt from "jsonwebtoken";
+import { generateTokenPair } from "../utils/jwt.js";
+import { hashPassword, verifyPassword } from "../utils/password.js";
+import { getLGAFromCoordinates, isValidCoordinates } from "../utils/location.js";
 
-const JWT_SECRET = process.env.JWT_SECRET || "your-secret-key";
-const JWT_REFRESH_SECRET =
-  process.env.JWT_REFRESH_SECRET || "your-refresh-secret-key";
+// In-memory store for vendor 2FA codes since the schema does not support these fields directly on User
+const temp2FAStore = new Map(); // key: userId, value: { code, method, expiresAt }
 
 /**
  * POST /api/v1/auth/vendor/signup
@@ -12,10 +12,21 @@ const JWT_REFRESH_SECRET =
  */
 export async function vendorSignup(req, res) {
   try {
-    const { email, password, businessName, businessPhone, businessCategory } =
-      req.body;
+    const {
+      email,
+      password,
+      businessName,
+      businessPhone,
+      businessCategory,
+      latitude,
+      longitude,
+      description,
+    } = req.body;
 
-    if (!email || !password || !businessName || !businessPhone) {
+    const name = businessName || req.body.name;
+    const phone = businessPhone || req.body.phone;
+
+    if (!email || !password || !name || !phone) {
       return res.status(400).json({
         success: false,
         error: "Email, password, business name, and business phone required",
@@ -26,6 +37,15 @@ export async function vendorSignup(req, res) {
       return res.status(400).json({
         success: false,
         error: "Password must be at least 8 characters",
+      });
+    }
+
+    const phoneRegex = /^(\+234|0)[789]\d{9}$/;
+    if (!phoneRegex.test(phone)) {
+      return res.status(400).json({
+        success: false,
+        error: "Invalid Nigerian phone number",
+        example: "+2348123456789",
       });
     }
 
@@ -40,44 +60,67 @@ export async function vendorSignup(req, res) {
       });
     }
 
-    const hashedPassword = await bcrypt.hash(password, 10);
+    const existingVendor = await global.prisma.Vendor.findFirst({
+      where: {
+        OR: [{ phone }, { email }],
+      },
+    });
 
+    if (existingVendor) {
+      return res.status(409).json({
+        success: false,
+        error: "Vendor with this phone or email already exists",
+      });
+    }
+
+    // Coordinates fallback to Lagos (Ikeja) if not provided (to avoid Prisma validation crash)
+    const parsedLatitude = latitude !== undefined ? parseFloat(latitude) : 6.6018;
+    const parsedLongitude = longitude !== undefined ? parseFloat(longitude) : 3.3515;
+
+    if (!isValidCoordinates(parsedLatitude, parsedLongitude)) {
+      return res.status(400).json({
+        success: false,
+        error: "Valid coordinates (latitude and longitude) are required",
+      });
+    }
+
+    const hashedPassword = await hashPassword(password);
+
+    // Create User with role VENDOR
     const user = await global.prisma.User.create({
       data: {
         email,
+        phone,
+        name,
         password: hashedPassword,
         role: "VENDOR",
         isVerified: false,
       },
     });
 
+    // Create Vendor profile mapping to User
+    const lga = getLGAFromCoordinates(parsedLatitude, parsedLongitude);
     const vendor = await global.prisma.Vendor.create({
       data: {
         userId: user.id,
-        businessName,
-        businessPhone,
-        businessCategory: businessCategory || "General",
-        isApproved: false,
+        name,
+        phone,
+        email,
+        latitude: parsedLatitude,
+        longitude: parsedLongitude,
+        lga,
+        description: description || businessCategory || "General",
+        isVerified: false,
         isActive: true,
       },
     });
 
-    const accessToken = jwt.sign(
-      { userId: user.id, role: "VENDOR" },
-      JWT_SECRET,
-      { expiresIn: "15m" },
-    );
-
-    const refreshToken = jwt.sign(
-      { userId: user.id, role: "VENDOR" },
-      JWT_REFRESH_SECRET,
-      { expiresIn: "7d" },
-    );
+    const { accessToken, refreshToken } = generateTokenPair(user);
 
     await global.prisma.RefreshToken.create({
       data: {
         userId: user.id,
-        refreshToken,
+        token: refreshToken,
         expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
       },
     });
@@ -87,17 +130,22 @@ export async function vendorSignup(req, res) {
       message: "Vendor account created successfully",
       accessToken,
       refreshToken,
-      expiresIn: "15m",
+      expiresIn: "15 minutes",
       vendor: {
+        id: vendor.id,
         vendorId: vendor.id,
         userId: user.id,
-        businessName: vendor.businessName,
-        businessPhone: vendor.businessPhone,
-        isApproved: vendor.isApproved,
+        name: vendor.name,
+        businessName: vendor.name,
+        phone: vendor.phone,
+        businessPhone: vendor.phone,
+        isVerified: vendor.isVerified,
+        isApproved: vendor.isVerified,
         nextStep: "Complete vendor dashboard setup",
       },
     });
   } catch (error) {
+    console.error("[Vendor Auth Signup] Error:", error);
     return res.status(500).json({
       success: false,
       error: error.message,
@@ -129,7 +177,7 @@ export async function vendorLogin(req, res) {
       });
     }
 
-    const passwordMatch = await bcrypt.compare(password, user.password || "");
+    const passwordMatch = await verifyPassword(password, user.password || "");
 
     if (!passwordMatch) {
       return res.status(401).json({
@@ -156,22 +204,12 @@ export async function vendorLogin(req, res) {
       });
     }
 
-    const accessToken = jwt.sign(
-      { userId: user.id, role: "VENDOR" },
-      JWT_SECRET,
-      { expiresIn: "15m" },
-    );
-
-    const refreshToken = jwt.sign(
-      { userId: user.id, role: "VENDOR" },
-      JWT_REFRESH_SECRET,
-      { expiresIn: "7d" },
-    );
+    const { accessToken, refreshToken } = generateTokenPair(user);
 
     await global.prisma.RefreshToken.create({
       data: {
         userId: user.id,
-        refreshToken,
+        token: refreshToken,
         expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
       },
     });
@@ -181,14 +219,20 @@ export async function vendorLogin(req, res) {
       message: "Vendor login successful",
       accessToken,
       refreshToken,
-      expiresIn: "15m",
+      expiresIn: "15 minutes",
       vendor: {
+        id: vendor.id,
         vendorId: vendor.id,
-        businessName: vendor.businessName,
-        isApproved: vendor.isApproved,
+        name: vendor.name,
+        businessName: vendor.name,
+        phone: vendor.phone,
+        email: vendor.email,
+        isVerified: vendor.isVerified,
+        isApproved: vendor.isVerified,
       },
     });
   } catch (error) {
+    console.error("[Vendor Auth Login] Error:", error);
     return res.status(500).json({
       success: false,
       error: error.message,
@@ -224,17 +268,14 @@ export async function setupVendor2FA(req, res) {
 
     const twoFACode = Math.random().toString().slice(2, 8).padStart(6, "0");
 
-    // TODO: Send 2FA code via email or SMS
-    // await sendVendor2FACode(user.email, twoFACode, method);
-
-    await global.prisma.User.update({
-      where: { id: userId },
-      data: {
-        twoFACode,
-        twoFAMethod: method,
-        twoFAExpiresAt: new Date(Date.now() + 10 * 60 * 1000),
-      },
+    // Store temporary 2FA code in-memory to prevent schema mismatch crash
+    temp2FAStore.set(userId, {
+      code: twoFACode,
+      method,
+      expiresAt: new Date(Date.now() + 10 * 60 * 1000),
     });
+
+    console.log(`[Vendor 2FA] Set up 2FA for user ${userId} (${method}): ${twoFACode}`);
 
     return res.json({
       success: true,
@@ -243,6 +284,7 @@ export async function setupVendor2FA(req, res) {
       expiresIn: "10 minutes",
     });
   } catch (error) {
+    console.error("[Vendor 2FA Setup] Error:", error);
     return res.status(500).json({
       success: false,
       error: error.message,
@@ -277,47 +319,61 @@ export async function verifyVendor2FA(req, res) {
       });
     }
 
-    if (user.twoFACode !== code) {
+    const stored2FA = temp2FAStore.get(userId);
+
+    if (!stored2FA || stored2FA.code !== code) {
       return res.status(401).json({
         success: false,
         error: "Invalid 2FA code",
       });
     }
 
-    if (new Date() > user.twoFAExpiresAt) {
+    if (new Date() > stored2FA.expiresAt) {
       return res.status(401).json({
         success: false,
         error: "2FA code expired. Request a new one.",
       });
     }
 
+    // Clear 2FA code from memory
+    temp2FAStore.delete(userId);
+
+    // Update verified status in DB
     await global.prisma.User.update({
       where: { id: userId },
       data: {
         isVerified: true,
-        twoFACode: null,
-        twoFAMethod: null,
-        twoFAExpiresAt: null,
+        verifiedAt: new Date(),
       },
     });
 
-    const vendor = await global.prisma.Vendor.findUnique({
+    const vendor = await global.prisma.Vendor.update({
       where: { userId },
+      data: {
+        isVerified: true,
+        verifiedAt: new Date(),
+      },
     });
 
     return res.json({
       success: true,
       message: "2FA verified successfully",
       vendor: {
+        id: vendor.id,
         vendorId: vendor.id,
-        businessName: vendor.businessName,
-        isApproved: vendor.isApproved,
-        nextStep: vendor.isApproved
+        name: vendor.name,
+        businessName: vendor.name,
+        phone: vendor.phone,
+        email: vendor.email,
+        isVerified: vendor.isVerified,
+        isApproved: vendor.isVerified,
+        nextStep: vendor.isVerified
           ? "Access vendor dashboard at /vendor/dashboard"
           : "Awaiting admin approval. Check email for updates.",
       },
     });
   } catch (error) {
+    console.error("[Vendor 2FA Verify] Error:", error);
     return res.status(500).json({
       success: false,
       error: error.message,

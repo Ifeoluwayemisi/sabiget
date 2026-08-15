@@ -25,7 +25,7 @@ const cardVariants = {
 const hoverVariants = {
   hover: {
     y: -8,
-    boxShadow: "0 20px 25px -5rgba(0, 0, 0, 0.1)",
+    boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.1)",
     transition: { type: "spring", stiffness: 300, damping: 10 },
   },
 };
@@ -51,9 +51,10 @@ export default function VendorCard({
       className="rounded-lg overflow-hidden bg-white shadow-md hover:shadow-xl transition-shadow"
       variants={cardVariants}
       whileHover="hover"
-      variants={hoverVariants}
+      animate="visible"
+      initial="hidden"
+      transition={{ duration: 0.5 }}
     >
-      {/* Image Container */}
       <motion.div
         className="relative h-40 overflow-hidden bg-gray-200"
         variants={imageVariants}
@@ -61,7 +62,6 @@ export default function VendorCard({
         <img src={image} alt={name} className="w-full h-full object-cover" />
         <div className="absolute inset-0 bg-black/0 hover:bg-black/10 transition-all" />
 
-        {/* Category Badge */}
         <motion.div
           className="absolute top-2 right-2 bg-orange-500 text-white px-3 py-1 rounded-full text-sm font-semibold"
           initial={{ opacity: 0, x: 20 }}
@@ -72,11 +72,9 @@ export default function VendorCard({
         </motion.div>
       </motion.div>
 
-      {/* Content */}
       <div className="p-4">
         <h3 className="text-lg font-bold text-gray-900 mb-2">{name}</h3>
 
-        {/* Rating */}
         <div className="flex items-center gap-1 mb-3">
           <div className="flex items-center">
             {[...Array(5)].map((_, i) => (
@@ -96,7 +94,6 @@ export default function VendorCard({
           <span className="text-xs text-gray-500">({reviews})</span>
         </div>
 
-        {/* Info Grid */}
         <div className="space-y-2 border-t pt-3">
           <motion.div
             className="flex items-center gap-2 text-sm text-gray-600"
@@ -120,7 +117,6 @@ export default function VendorCard({
           </motion.div>
         </div>
 
-        {/* CTA Button */}
         <motion.button
           className="w-full mt-4 bg-orange-500 hover:bg-orange-600 text-white py-2 rounded-lg font-semibold transition-all"
           whileHover={{ scale: 1.02 }}

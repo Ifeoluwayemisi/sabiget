@@ -53,9 +53,7 @@ export default function Footer() {
         whileInView="visible"
         viewport={{ once: true }}
       >
-        {/* Main Footer Content */}
         <div className="grid grid-cols-1 md:grid-cols-5 gap-8 mb-12">
-          {/* Brand */}
           <motion.div variants={itemVariants} className="col-span-1">
             <h2 className="text-2xl font-bold text-orange-500 mb-4">Sabiget</h2>
             <p className="text-gray-400 mb-6">
@@ -77,8 +75,7 @@ export default function Footer() {
             </div>
           </motion.div>
 
-          {/* Links */}
-          {Object.entries(footerLinks).map(([category, links], idx) => (
+          {Object.entries(footerLinks).map(([category, links]) => (
             <motion.div
               key={category}
               variants={itemVariants}
@@ -101,7 +98,6 @@ export default function Footer() {
           ))}
         </div>
 
-        {/* Divider */}
         <motion.div
           className="border-t border-gray-800 my-8"
           initial={{ scaleX: 0 }}
@@ -109,17 +105,14 @@ export default function Footer() {
           viewport={{ once: true }}
         />
 
-        {/* Bottom Section */}
         <motion.div
           variants={itemVariants}
           className="flex flex-col md:flex-row justify-between items-center gap-6"
         >
-          {/* Copyright */}
           <p className="text-gray-400 text-sm">
             © 2026 Sabiget. All rights reserved. Made with ❤️ in Lagos.
           </p>
 
-          {/* Social Links */}
           <div className="flex gap-6">
             {socialLinks.map(({ icon: Icon, href, label }) => (
               <motion.a
@@ -135,7 +128,6 @@ export default function Footer() {
             ))}
           </div>
 
-          {/* CTA */}
           <motion.button
             className="px-6 py-2 bg-orange-500 hover:bg-orange-600 rounded-lg font-semibold transition"
             whileHover={{ scale: 1.05 }}
@@ -145,7 +137,6 @@ export default function Footer() {
           </motion.button>
         </motion.div>
 
-        {/* Newsletter Section */}
         <motion.div
           variants={itemVariants}
           className="mt-12 p-6 bg-orange-500/10 border border-orange-500/30 rounded-lg text-center"

@@ -41,26 +41,23 @@ export default function Hero({ onGetStarted }: HeroProps) {
         whileInView="visible"
         viewport={{ once: true }}
       >
-        {/* Badge */}
         <motion.div variants={itemVariants} className="inline-block mb-6">
           <div className="bg-orange-100 text-orange-700 px-4 py-2 rounded-full text-sm font-medium">
             🚀 Launching in your city soon
           </div>
         </motion.div>
 
-        {/* Main Heading */}
         <motion.h1
           variants={itemVariants}
           className="text-5xl md:text-7xl font-bold text-gray-900 mb-6 leading-tight"
         >
           Your Favorite{" "}
-          <span className="bg-gradient-to-r from-orange-500 to-red-500 bg-clip-text text-transparent">
+          <span className="bg-linear-to-r from-orange-500 to-red-500 bg-clip-text text-transparent">
             Local Meals
           </span>
           , Delivered Fast
         </motion.h1>
 
-        {/* Subheading */}
         <motion.p
           variants={itemVariants}
           className="text-xl md:text-2xl text-gray-600 mb-8 max-w-2xl mx-auto"
@@ -69,7 +66,6 @@ export default function Hero({ onGetStarted }: HeroProps) {
           with our secure DVC system
         </motion.p>
 
-        {/* CTA Buttons */}
         <motion.div
           variants={itemVariants}
           className="flex flex-col sm:flex-row gap-4 justify-center items-center"
@@ -85,12 +81,10 @@ export default function Hero({ onGetStarted }: HeroProps) {
           </button>
         </motion.div>
 
-        {/* Scroll Indicator */}
         <motion.div
           variants={itemVariants}
           className="mt-20"
-          animate="animate"
-          variants={bounce}
+          animate={bounce.animate}
         >
           <ChevronDown className="w-8 h-8 text-orange-500 mx-auto" />
         </motion.div>
