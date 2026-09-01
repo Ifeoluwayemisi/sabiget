@@ -3,14 +3,9 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { motion } from "framer-motion";
-import {
-  CheckCircle2,
-  Clock3,
-  PackageCheck,
-  Truck,
-  AlertCircle,
-} from "lucide-react";
-import { API_BASE_URL } from "@/lib/api/client";
+import { apiRequest, getAccessToken } from "@/lib/api/client";
+import { formatNaira } from "@/lib/format";
+import { getOrderStatusMeta } from "@/lib/orderStatus";
 
 interface OrderItem {
   quantity?: number;
@@ -31,82 +26,21 @@ interface CustomerOrder {
   items?: OrderItem[];
 }
 
-const statusMeta: Record<string, { label: string; tone: string; icon: any }> = {
-  UNPAID: {
-    label: "Awaiting payment",
-    tone: "bg-amber-100 text-amber-700",
-    icon: Clock3,
-  },
-  PENDING: { label: "Pending", tone: "bg-sky-100 text-sky-700", icon: Clock3 },
-  ACCEPTED: {
-    label: "Accepted",
-    tone: "bg-violet-100 text-violet-700",
-    icon: PackageCheck,
-  },
-  PREPARING: {
-    label: "Preparing",
-    tone: "bg-orange-100 text-orange-700",
-    icon: PackageCheck,
-  },
-  OUT_FOR_DELIVERY: {
-    label: "Out for delivery",
-    tone: "bg-blue-100 text-blue-700",
-    icon: Truck,
-  },
-  DELIVERED: {
-    label: "Delivered",
-    tone: "bg-emerald-100 text-emerald-700",
-    icon: CheckCircle2,
-  },
-  COMPLETED: {
-    label: "Completed",
-    tone: "bg-emerald-100 text-emerald-700",
-    icon: CheckCircle2,
-  },
-  CANCELLED_CUSTOMER: {
-    label: "Cancelled",
-    tone: "bg-red-100 text-red-700",
-    icon: AlertCircle,
-  },
-  CANCELLED_VENDOR: {
-    label: "Cancelled",
-    tone: "bg-red-100 text-red-700",
-    icon: AlertCircle,
-  },
-  CANCELLED_AUTO_KILL: {
-    label: "Auto cancelled",
-    tone: "bg-red-100 text-red-700",
-    icon: AlertCircle,
-  },
-  REFUNDED: {
-    label: "Refunded",
-    tone: "bg-gray-200 text-gray-700",
-    icon: AlertCircle,
-  },
-};
-
 export default function CustomerOrdersPage() {
   const [orders, setOrders] = useState<CustomerOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const token = localStorage.getItem("accessToken");
+    const loadOrders = async () => {
+      if (!getAccessToken()) {
+        setError("Please sign in to view your order history.");
+        setLoading(false);
+        return;
+      }
 
-    if (!token) {
-      setError("Please sign in to view your order history.");
-      setLoading(false);
-      return;
-    }
-
-    const fetchOrders = async () => {
       try {
-        const response = await fetch(`${API_BASE_URL}/orders`, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-        });
+        const response = await apiRequest("/orders");
 
         const data = await response.json();
 
@@ -126,7 +60,7 @@ export default function CustomerOrdersPage() {
       }
     };
 
-    fetchOrders();
+    void loadOrders();
   }, []);
 
   if (loading) {
@@ -161,7 +95,7 @@ export default function CustomerOrdersPage() {
       <div className="mx-auto max-w-6xl">
         <div className="mb-8 flex items-center justify-between gap-4">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-orange-500">
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#e63d00]">
               Customer area
             </p>
             <h1 className="mt-2 text-3xl font-black text-gray-900">
@@ -186,7 +120,7 @@ export default function CustomerOrdersPage() {
             </p>
             <Link
               href="/"
-              className="mt-5 inline-block rounded-lg bg-orange-500 px-5 py-3 text-sm font-bold text-white"
+              className="mt-5 inline-block rounded-lg bg-[#ff4500] px-5 py-3 text-sm font-bold text-white"
             >
               Explore vendors
             </Link>
@@ -194,11 +128,7 @@ export default function CustomerOrdersPage() {
         ) : (
           <div className="grid gap-5">
             {orders.map((order) => {
-              const meta = statusMeta[order.status] || {
-                label: order.status,
-                tone: "bg-gray-100 text-gray-700",
-                icon: Clock3,
-              };
+              const meta = getOrderStatusMeta(order.status);
               const StatusIcon = meta.icon;
 
               return (
@@ -224,7 +154,7 @@ export default function CustomerOrdersPage() {
                         {meta.label}
                       </span>
                       <span className="text-lg font-black text-gray-900">
-                        ₦{Number(order.totalAmount || 0).toLocaleString()}
+                        {formatNaira(Number(order.totalAmount || 0))}
                       </span>
                     </div>
                   </div>
@@ -275,8 +205,8 @@ export default function CustomerOrdersPage() {
                               {item.product?.name || `Item ${index + 1}`}
                             </span>
                             <span>
-                              {item.quantity || 1} x ₦
-                              {Number(item.totalPrice || 0).toLocaleString()}
+                              {item.quantity || 1} x{" "}
+                              {formatNaira(Number(item.totalPrice || 0))}
                             </span>
                           </div>
                         ))}

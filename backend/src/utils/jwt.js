@@ -63,3 +63,35 @@ export function generateTokenPair(user) {
     refreshToken: generateRefreshToken(user.id, user.role),
   };
 }
+
+const GUEST_ORDER_TOKEN_EXPIRY = "24h";
+
+/**
+ * Limited-scope token that lets an unauthenticated guest read exactly one
+ * order after checkout. Signed with the refresh secret (never the access
+ * secret) so it cannot be replayed against authenticateToken routes, and it
+ * carries a scope claim that must be checked on every use.
+ */
+export function generateGuestOrderToken(orderId) {
+  return jwt.sign(
+    { orderId, scope: "order:read" },
+    JWT_REFRESH_SECRET,
+    { expiresIn: GUEST_ORDER_TOKEN_EXPIRY },
+  );
+}
+
+/**
+ * Verify a guest order token. Returns { orderId } only when the signature,
+ * expiry, scope claim, and orderId binding all check out; null otherwise.
+ */
+export function verifyGuestOrderToken(token) {
+  try {
+    const payload = jwt.verify(token, JWT_REFRESH_SECRET);
+    if (!payload || payload.scope !== "order:read" || !payload.orderId) {
+      return null;
+    }
+    return payload;
+  } catch (error) {
+    return null;
+  }
+}

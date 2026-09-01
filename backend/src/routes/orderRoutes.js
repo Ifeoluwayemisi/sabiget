@@ -11,6 +11,11 @@ import {
   triggerOrderRefund,
 } from "../services/orderService.js";
 import { generateDVC, generateIdempotencyKey } from "../utils/generators.js";
+import { emitOrderStatusUpdate } from "../services/socketService.js";
+import {
+  generateGuestOrderToken,
+  verifyGuestOrderToken,
+} from "../utils/jwt.js";
 import { updateLoyaltyPointsOnOrderCompletion } from "../services/customerService.js";
 
 const router = express.Router();
@@ -164,13 +169,18 @@ router.post("/guest-checkout", checkoutLimiter, async (req, res) => {
       },
     });
 
-    if (!paystackRes.status) {
-      return res.status(400).json({
+    if (!paystackRes.success) {
+      return res.status(500).json({
         success: false,
         error: "Payment initialization failed",
-        details: paystackRes.message,
+        details: paystackRes.error,
       });
     }
+
+    await global.prisma.Order.update({
+      where: { id: order.id },
+      data: { paystackAccessCode: paystackRes.data.access_code },
+    });
 
     return res.status(201).json({
       success: true,
@@ -180,6 +190,9 @@ router.post("/guest-checkout", checkoutLimiter, async (req, res) => {
       authorizationUrl: paystackRes.data.authorization_url,
       paystackAccessCode: paystackRes.data.access_code,
       reference: paymentReference,
+      // Short-lived, bound to this single order; enables guest tracking
+      // without weakening GET /orders/:id authentication.
+      guestOrderToken: generateGuestOrderToken(order.id),
       expiresIn: "1 hour",
       nextStep: "Verify OTP at /auth/send-otp",
     });
@@ -188,6 +201,64 @@ router.post("/guest-checkout", checkoutLimiter, async (req, res) => {
       success: false,
       error: error.message,
     });
+  }
+});
+
+/**
+ * GET /api/orders/:id/guest-status
+ * Limited-scope order tracking for guests who paid without signing in.
+ * Requires the short-lived guestOrderToken issued by /guest-checkout.
+ * The token is bound to a single order ID and grants read access to that
+ * order only, so normal authentication rules stay intact.
+ */
+router.get("/:id/guest-status", async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization || "";
+    const token = authHeader.startsWith("Bearer ")
+      ? authHeader.slice("Bearer ".length)
+      : null;
+
+    if (!token) {
+      return res.status(401).json({
+        success: false,
+        error: "Guest order token required",
+      });
+    }
+
+    const payload = verifyGuestOrderToken(token);
+
+    // Ownership binding: even a valid token must match THIS order.
+    if (!payload || payload.orderId !== req.params.id) {
+      return res.status(403).json({
+        success: false,
+        error: "Invalid token for this order",
+      });
+    }
+
+    const order = await global.prisma.Order.findUnique({
+      where: { id: req.params.id },
+      include: {
+        items: {
+          include: { product: true },
+        },
+        vendor: {
+          select: { id: true, name: true, phone: true, email: true },
+        },
+        user: {
+          select: { id: true, name: true, phone: true, email: true },
+        },
+      },
+    });
+
+    if (!order) {
+      return res
+        .status(404)
+        .json({ success: false, error: "Order not found" });
+    }
+
+    res.json({ success: true, order });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
@@ -509,8 +580,10 @@ router.post(
 
       const dvcCode = generateDVC();
 
-      await global.prisma.Order.update({
-        where: { id },
+      // Guarded transition: a concurrent customer cancel, vendor reject, or
+      // auto-kill wins and this update matches nothing.
+      const accepted = await global.prisma.Order.updateMany({
+        where: { id, vendorId: vendor.id, status: "PENDING" },
         data: {
           status: "ACCEPTED",
           acceptedAt: new Date(),
@@ -518,6 +591,29 @@ router.post(
           dvcCode,
         },
       });
+
+      if (accepted.count === 0) {
+        const latest = await global.prisma.Order.findUnique({
+          where: { id },
+          select: { status: true },
+        });
+
+        if (latest && latest.status === "ACCEPTED") {
+          return res.json({
+            success: true,
+            message: "Order already accepted",
+            orderId: id,
+            status: "ACCEPTED",
+          });
+        }
+
+        return res.status(400).json({
+          success: false,
+          error: `Cannot accept order in ${latest ? latest.status : "unknown"} status`,
+        });
+      }
+
+      emitOrderStatusUpdate({ ...currentOrder, status: "ACCEPTED" });
 
       res.json({
         success: true,
@@ -590,14 +686,30 @@ router.post(
         });
       }
 
-      const cancelledOrder = await global.prisma.Order.update({
-        where: { id },
+      const rejected = await global.prisma.Order.updateMany({
+        where: { id, status: "PENDING" },
         data: {
           status: "CANCELLED_VENDOR",
           cancelledAt: new Date(),
           acceptanceDeadline: null,
           adminNotes: reason || "Vendor rejected order",
         },
+      });
+
+      if (rejected.count === 0) {
+        const latest = await global.prisma.Order.findUnique({
+          where: { id },
+          select: { status: true },
+        });
+
+        return res.status(400).json({
+          success: false,
+          error: `Cannot reject order in ${latest ? latest.status : "unknown"} status`,
+        });
+      }
+
+      const cancelledOrder = await global.prisma.Order.findUnique({
+        where: { id },
       });
 
       const refundResult = await triggerOrderRefund(
@@ -612,6 +724,8 @@ router.post(
           details: refundResult.error,
         });
       }
+
+      emitOrderStatusUpdate({ ...cancelledOrder, status: "REFUNDED" });
 
       res.json({
         success: true,
@@ -666,13 +780,36 @@ router.post(
         });
       }
 
-      await global.prisma.Order.update({
-        where: { id },
+      const updated = await global.prisma.Order.updateMany({
+        where: { id, vendorId: vendor.id, status: "ACCEPTED" },
         data: {
           status: "OUT_FOR_DELIVERY",
           preparedAt: new Date(),
         },
       });
+
+      if (updated.count === 0) {
+        const latest = await global.prisma.Order.findUnique({
+          where: { id },
+          select: { status: true },
+        });
+
+        if (latest && latest.status === "OUT_FOR_DELIVERY") {
+          return res.json({
+            success: true,
+            message: "Order already out for delivery",
+            orderId: id,
+            status: "OUT_FOR_DELIVERY",
+          });
+        }
+
+        return res.status(400).json({
+          success: false,
+          error: `Cannot mark as out for delivery from ${latest ? latest.status : "unknown"}`,
+        });
+      }
+
+      emitOrderStatusUpdate({ ...order, status: "OUT_FOR_DELIVERY" });
 
       res.json({
         success: true,
@@ -742,30 +879,70 @@ router.post(
       }
 
       if (order.dvcCode !== dvcCode.toUpperCase()) {
-        const newAttempts = order.dvcAttempts + 1;
-        const lockUpdate =
-          newAttempts >= 3
-            ? { dvcLockedUntil: new Date(Date.now() + 30 * 60 * 1000) }
-            : {};
-
+        // Atomic increment so simultaneous wrong submissions all count.
         await global.prisma.Order.update({
           where: { id },
-          data: { dvcAttempts: newAttempts, ...lockUpdate },
+          data: { dvcAttempts: { increment: 1 } },
         });
+
+        const attemptsSnapshot = await global.prisma.Order.findUnique({
+          where: { id },
+          select: { dvcAttempts: true, dvcLockedUntil: true },
+        });
+
+        if (
+          attemptsSnapshot &&
+          attemptsSnapshot.dvcAttempts >= 3 &&
+          !attemptsSnapshot.dvcLockedUntil
+        ) {
+          await global.prisma.Order.updateMany({
+            where: { id, dvcLockedUntil: null },
+            data: {
+              dvcLockedUntil: new Date(Date.now() + 30 * 60 * 1000),
+            },
+          });
+        }
 
         return res
           .status(400)
           .json({ success: false, error: "Invalid DVC code" });
       }
 
-      await global.prisma.Order.update({
-        where: { id },
+      const delivered = await global.prisma.Order.updateMany({
+        where: { id, vendorId: vendor.id, status: "OUT_FOR_DELIVERY" },
         data: {
           status: "DELIVERED",
           deliveredAt: new Date(),
           dvcEnteredAt: new Date(),
+          dvcLockedUntil: null,
         },
       });
+
+      if (delivered.count === 0) {
+        const latest = await global.prisma.Order.findUnique({
+          where: { id },
+          select: { status: true },
+        });
+
+        if (
+          latest &&
+          (latest.status === "DELIVERED" || latest.status === "COMPLETED")
+        ) {
+          return res.json({
+            success: true,
+            message: "DVC already verified",
+            orderId: id,
+            status: latest.status,
+          });
+        }
+
+        return res.status(400).json({
+          success: false,
+          error: "Order is not out for delivery yet",
+        });
+      }
+
+      emitOrderStatusUpdate({ ...order, status: "DELIVERED" });
 
       res.json({
         success: true,
@@ -842,6 +1019,8 @@ router.post(
         // Don't fail the request, just log the error
       }
 
+      emitOrderStatusUpdate(result.order);
+
       return res.json({
         success: true,
         message: result.alreadyCompleted
@@ -902,14 +1081,30 @@ router.post("/:id/cancel", authenticateToken, async (req, res) => {
       });
     }
 
-    const cancelledOrder = await global.prisma.Order.update({
-      where: { id },
+    const cancelled = await global.prisma.Order.updateMany({
+      where: { id, userId, status: "PENDING" },
       data: {
         status: "CANCELLED_CUSTOMER",
         cancelledAt: new Date(),
         acceptanceDeadline: null,
         adminNotes: reason || "Customer cancelled before vendor acceptance",
       },
+    });
+
+    if (cancelled.count === 0) {
+      const latest = await global.prisma.Order.findUnique({
+        where: { id },
+        select: { status: true },
+      });
+
+      return res.status(400).json({
+        success: false,
+        error: `Cannot cancel order in ${latest ? latest.status : "unknown"} status`,
+      });
+    }
+
+    const cancelledOrder = await global.prisma.Order.findUnique({
+      where: { id },
     });
 
     const refundResult = await triggerOrderRefund(
@@ -925,6 +1120,8 @@ router.post("/:id/cancel", authenticateToken, async (req, res) => {
       });
     }
 
+    emitOrderStatusUpdate({ ...cancelledOrder, status: "REFUNDED" });
+
     res.json({
       success: true,
       message: "Order cancelled and refund initiated",
@@ -933,174 +1130,6 @@ router.post("/:id/cancel", authenticateToken, async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-/**
- * POST /api/orders/guest-checkout
- * Create order as anonymous GUEST (no authentication needed)
- * Body: { phone, vendorId, items, deliveryAddress, deliveryLat, deliveryLng }
- */
-router.post("/guest-checkout", checkoutLimiter, async (req, res) => {
-  try {
-    const {
-      phone,
-      vendorId,
-      items,
-      deliveryAddress,
-      deliveryLat,
-      deliveryLng,
-    } = req.body;
-
-    if (!phone) {
-      return res.status(400).json({
-        success: false,
-        error: "Phone number required for guest checkout",
-      });
-    }
-
-    if (!vendorId || !items || !items.length || !deliveryAddress) {
-      return res.status(400).json({
-        success: false,
-        error: "Vendor ID, items, and delivery address required",
-      });
-    }
-
-    const phoneRegex = /^(\+234|0)[789]\d{9}$/;
-    if (!phoneRegex.test(phone)) {
-      return res.status(400).json({
-        success: false,
-        error: "Invalid Nigerian phone number",
-        example: "+2348123456789",
-      });
-    }
-
-    // Find or create GUEST user with this phone
-    let user = await global.prisma.User.findUnique({ where: { phone } });
-
-    if (!user) {
-      user = await global.prisma.User.create({
-        data: {
-          phone,
-          role: "GUEST",
-          isVerified: false,
-        },
-      });
-    } else if (user.role !== "GUEST" && user.role !== "MEMBER") {
-      return res.status(403).json({
-        success: false,
-        error: "This phone is registered as a vendor account",
-      });
-    }
-
-    const vendor = await global.prisma.Vendor.findUnique({
-      where: { id: vendorId },
-    });
-
-    if (!vendor) {
-      return res
-        .status(404)
-        .json({ success: false, error: "Vendor not found" });
-    }
-
-    if (!vendor.paystackSubcode) {
-      return res.status(400).json({
-        success: false,
-        error: "Vendor is not configured to receive payments yet.",
-      });
-    }
-
-    let foodCost = 0;
-    const orderItemsData = [];
-
-    for (const item of items) {
-      const product = await global.prisma.Product.findUnique({
-        where: { id: item.productId },
-      });
-      if (!product || product.vendorId !== vendor.id || !product.isAvailable) {
-        return res.status(400).json({
-          success: false,
-          error: `Product ${item.productId} is invalid or unavailable`,
-        });
-      }
-
-      const totalPrice = product.price * item.quantity;
-      foodCost += totalPrice;
-
-      orderItemsData.push({
-        productId: product.id,
-        quantity: item.quantity,
-        pricePerUnit: product.price,
-        totalPrice,
-        specialRequests: item.specialRequests || null,
-      });
-    }
-
-    const serviceFee = 500;
-    const platformFee = 0;
-    const totalAmount = foodCost + serviceFee + platformFee;
-    const paymentReference = `SG-ORD-${Date.now()}-${generateIdempotencyKey()}`;
-    const idempotencyKey = generateIdempotencyKey();
-
-    const order = await global.prisma.Order.create({
-      data: {
-        userId: user.id,
-        vendorId,
-        status: "UNPAID",
-        foodCost,
-        serviceFee,
-        platformFee,
-        totalAmount,
-        paymentReference,
-        idempotencyKey,
-        deliveryAddress,
-        deliveryLat: parseFloat(deliveryLat) || 0,
-        deliveryLng: parseFloat(deliveryLng) || 0,
-        items: {
-          create: orderItemsData,
-        },
-      },
-    });
-
-    const paystackRes = await initializePayment({
-      email: user.email || `guest+${phone}@sabiget.com`,
-      amount: totalAmount,
-      reference: paymentReference,
-      callbackUrl: "https://sabiget.com/payment-callback",
-      subaccount: vendor.paystackSubcode,
-      transaction_charge: serviceFee,
-      metadata: {
-        orderId: order.id,
-        vendorId: vendor.id,
-        userId: user.id,
-        isGuest: true,
-      },
-    });
-
-    if (!paystackRes.status) {
-      return res.status(400).json({
-        success: false,
-        error: "Payment initialization failed",
-        details: paystackRes.message,
-      });
-    }
-
-    return res.status(201).json({
-      success: true,
-      message:
-        "Guest order created. Please verify your phone to complete payment.",
-      orderId: order.id,
-      authorizationUrl: paystackRes.data.authorization_url,
-      paystackAccessCode: paystackRes.data.access_code,
-      reference: paymentReference,
-      expiresIn: "1 hour",
-      nextStep: "Verify OTP at /auth/send-otp",
-    });
-  } catch (error) {
-    return res.status(500).json({
-      success: false,
-      error: error.message,
-    });
   }
 });
 

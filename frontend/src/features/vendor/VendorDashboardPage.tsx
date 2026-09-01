@@ -1,16 +1,20 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import {
   CheckCircle2,
   Clock3,
-  PackageCheck,
   ShoppingBag,
-  Truck,
   Wallet,
 } from "lucide-react";
-import { API_BASE_URL } from "@/lib/api/client";
+import type { Socket } from "socket.io-client";
+import { apiRequest } from "@/lib/api/client";
+import {
+  getSocket,
+  joinVendorRoom,
+  SOCKET_EVENTS,
+} from "@/lib/socket";
 
 interface DashboardStats {
   totalOrders: number;
@@ -77,7 +81,7 @@ export default function VendorDashboardPage() {
     return localStorage.getItem("accessToken");
   }, []);
 
-  const fetchDashboard = async () => {
+  const fetchDashboard = useCallback(async () => {
     if (!token) {
       setError("Please sign in as a vendor to view this dashboard.");
       setLoading(false);
@@ -86,12 +90,7 @@ export default function VendorDashboardPage() {
 
     try {
       setLoading(true);
-      const response = await fetch(`${API_BASE_URL}/vendors/dashboard/stats`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-      });
+      const response = await apiRequest("/vendors/dashboard/stats");
 
       const data = await response.json();
 
@@ -110,11 +109,55 @@ export default function VendorDashboardPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [token]);
 
   useEffect(() => {
-    fetchDashboard();
-  }, [token]);
+    const load = async () => {
+      await fetchDashboard();
+    };
+    void load();
+  }, [fetchDashboard]);
+
+  const vendorId = dashboard?.vendor.id;
+
+  // Realtime layer: order events never mutate dashboard state directly —
+  // they trigger an authoritative REST reconciliation via fetchDashboard.
+  useEffect(() => {
+    if (!token || !vendorId) return;
+
+    let cancelled = false;
+    let socket: Socket | null = null;
+
+    const onOrderEvent = () => void fetchDashboard();
+    const onConnect = () => void fetchDashboard();
+
+    const wireRealtime = async () => {
+      const pendingSocket = getSocket();
+      if (!pendingSocket || cancelled) return;
+
+      socket = await pendingSocket;
+      if (cancelled) return;
+
+      // Room membership is ownership-checked server side; a failure here
+      // simply leaves the dashboard on its normal REST behavior.
+      if (!(await joinVendorRoom(socket, vendorId))) return;
+
+      socket.on(SOCKET_EVENTS.ORDER_NEW, onOrderEvent);
+      socket.on(SOCKET_EVENTS.ORDER_STATUS_UPDATED, onOrderEvent);
+      socket.on("connect", onConnect);
+    };
+
+    void wireRealtime();
+
+    return () => {
+      cancelled = true;
+      if (socket) {
+        socket.off(SOCKET_EVENTS.ORDER_NEW, onOrderEvent);
+        socket.off(SOCKET_EVENTS.ORDER_STATUS_UPDATED, onOrderEvent);
+        socket.off("connect", onConnect);
+      }
+    };
+  }, [token, vendorId, fetchDashboard]);
 
   const updateOrderStatus = async (
     orderId: string,
@@ -126,17 +169,10 @@ export default function VendorDashboardPage() {
     setSubmittingId(orderId);
 
     try {
-      const response = await fetch(
-        `${API_BASE_URL}/orders/${orderId}/${action}`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-          body: extraBody ? JSON.stringify(extraBody) : undefined,
-        },
-      );
+      const response = await apiRequest(`/orders/${orderId}/${action}`, {
+        method: "POST",
+        body: extraBody ? JSON.stringify(extraBody) : undefined,
+      });
 
       const data = await response.json();
 
@@ -155,6 +191,16 @@ export default function VendorDashboardPage() {
     } finally {
       setSubmittingId(null);
     }
+  };
+
+  const handleRejectOrder = async (orderId: string) => {
+    // Destructive + financial (triggers a refund): require explicit intent.
+    const confirmed = window.confirm(
+      "Reject this order? The customer's payment will be refunded.",
+    );
+    if (!confirmed) return;
+
+    await updateOrderStatus(orderId, "reject");
   };
 
   if (!token && !loading) {
@@ -321,15 +367,24 @@ export default function VendorDashboardPage() {
 
                     <div className="mt-4 flex flex-wrap gap-2">
                       {order.status === "PENDING" && (
-                        <button
-                          onClick={() => updateOrderStatus(order.id, "accept")}
-                          disabled={submittingId === order.id}
-                          className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white disabled:bg-emerald-300"
-                        >
-                          {submittingId === order.id
-                            ? "Processing..."
-                            : "Accept order"}
-                        </button>
+                        <>
+                          <button
+                            onClick={() => updateOrderStatus(order.id, "accept")}
+                            disabled={submittingId === order.id}
+                            className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white disabled:bg-emerald-300"
+                          >
+                            {submittingId === order.id
+                              ? "Processing..."
+                              : "Accept order"}
+                          </button>
+                          <button
+                            onClick={() => handleRejectOrder(order.id)}
+                            disabled={submittingId === order.id}
+                            className="rounded-lg bg-red-600 px-3 py-2 text-xs font-semibold text-white disabled:bg-red-300"
+                          >
+                            Reject order
+                          </button>
+                        </>
                       )}
 
                       {order.status === "ACCEPTED" && (

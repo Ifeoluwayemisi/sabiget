@@ -11,5 +11,13 @@
   },
   "devDependencies": {
     "concurrently": "^9.0.1"
+  },
+  "scripts-prod": {
+    "docker:prod:build": "docker compose -f docker-compose.prod.yml build",
+    "docker:prod:up": "docker compose -f docker-compose.prod.yml up -d --remove-orphans",
+    "docker:prod:down": "docker compose -f docker-compose.prod.yml down -v"
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.1"
   }
 }

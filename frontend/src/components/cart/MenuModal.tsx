@@ -1,11 +1,15 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { X, Clock, IndianRupee, Plus, Minus, ShoppingCart } from "lucide-react";
-
-const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api/v1";
+import { X, Clock, Plus, Minus, ShoppingCart } from "lucide-react";
+import {
+  apiRequest,
+  getAccessToken,
+  subscribeToAuth,
+} from "@/lib/api/client";
+import { formatNaira } from "@/lib/format";
+import { setLatestOrder } from "@/lib/orderTracker";
 
 interface MenuModalProps {
   isOpen: boolean;
@@ -29,80 +33,74 @@ interface MenuCategory {
   products: ProductItem[];
 }
 
-const fallbackMenu: Record<string, MenuCategory[]> = {
-  default: [
-    {
-      category: "Popular",
-      products: [
-        {
-          id: "demo-jollof",
-          name: "Party Jollof Rice",
-          description: "Rich tomato rice with grilled chicken and plantain.",
-          price: 5400,
-          preparationTime: 25,
-          tags: ["Best seller", "Protein"],
-        },
-        {
-          id: "demo-soup",
-          name: "Pepper Soup Combo",
-          description: "Spicy soup with fresh fish, yam and greens.",
-          price: 6200,
-          preparationTime: 20,
-          tags: ["Hot", "Fresh"],
-        },
-        {
-          id: "demo-burger",
-          name: "Classic Chicken Burger",
-          description: "Savory burger served with slaw and fries.",
-          price: 4900,
-          preparationTime: 18,
-          tags: ["Quick", "Filling"],
-        },
-      ],
-    },
-  ],
-};
-
 export default function MenuModal({
   isOpen,
   vendorId,
   vendorName,
   onClose,
 }: MenuModalProps) {
-  const [categories, setCategories] = useState<MenuCategory[]>(
-    fallbackMenu.default,
-  );
+  const [categories, setCategories] = useState<MenuCategory[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [cart, setCart] = useState<
     Record<string, { product: ProductItem; quantity: number }>
   >({});
   const [guestPhone, setGuestPhone] = useState("");
   const [deliveryAddress, setDeliveryAddress] = useState("");
+  const [deliveryCoords, setDeliveryCoords] = useState<{
+    lat: number;
+    lng: number;
+  } | null>(null);
   const [orderStatus, setOrderStatus] = useState<string | null>(null);
   const [checkingOut, setCheckingOut] = useState(false);
-  const [hasAccessToken, setHasAccessToken] = useState(false);
+  const [menuRetryNonce, setMenuRetryNonce] = useState(0);
+
+  // Session presence via the auth pub/sub in the API client; stays correct
+  // after login/logout without a page reload and without an effect.
+  const hasAccessToken = useSyncExternalStore(
+    subscribeToAuth,
+    () => Boolean(getAccessToken()),
+    () => false,
+  );
 
   useEffect(() => {
-    setHasAccessToken(Boolean(localStorage.getItem("accessToken")));
+    if (!isOpen) return;
+
+    // Coordinates are held in memory only and used solely for this checkout.
+    if (
+      deliveryCoords ||
+      !("geolocation" in navigator)
+    ) {
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setDeliveryCoords({
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+        });
+      },
+      () => {
+        // Denied or unavailable: checkout proceeds without coordinates.
+      },
+      { enableHighAccuracy: true, timeout: 10000 },
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
 
   useEffect(() => {
     if (!isOpen || !vendorId) return;
 
     const fetchMenu = async () => {
-      const token = localStorage.getItem("accessToken");
       setLoading(true);
+      setLoadError(null);
       setOrderStatus(null);
+      setCategories([]);
 
       try {
-        const response = await fetch(
-          `${API_BASE_URL}/customers/vendors/${vendorId}/menu`,
-          {
-            headers: {
-              ...(token ? { Authorization: `Bearer ${token}` } : {}),
-              "Content-Type": "application/json",
-            },
-          },
+        const response = await apiRequest(
+          `/customers/vendors/${vendorId}/menu`,
         );
 
         if (!response.ok) {
@@ -110,18 +108,19 @@ export default function MenuModal({
         }
 
         const data = await response.json();
-        const nextCategories = data.vendor?.categories || fallbackMenu.default;
-        setCategories(nextCategories);
+        setCategories(data.vendor?.categories || []);
       } catch (error) {
         console.error("Failed to load menu:", error);
-        setCategories(fallbackMenu.default);
+        setLoadError(
+          "We couldn't load this vendor's menu. Please try again.",
+        );
       } finally {
         setLoading(false);
       }
     };
 
     fetchMenu();
-  }, [isOpen, vendorId]);
+  }, [isOpen, vendorId, menuRetryNonce]);
 
   const cartItems = useMemo(() => Object.values(cart), [cart]);
 
@@ -152,8 +151,9 @@ export default function MenuModal({
 
       const nextQuantity = current.quantity + delta;
       if (nextQuantity <= 0) {
-        const { [productId]: _removed, ...rest } = prev;
-        return rest;
+        return Object.fromEntries(
+          Object.entries(prev).filter(([id]) => id !== productId),
+        );
       }
 
       return {
@@ -172,7 +172,7 @@ export default function MenuModal({
       return;
     }
 
-    const token = localStorage.getItem("accessToken");
+    const token = getAccessToken();
 
     if (!token && !guestPhone.trim()) {
       setOrderStatus("Please enter your phone number for guest checkout.");
@@ -191,8 +191,9 @@ export default function MenuModal({
       const payload = {
         vendorId,
         deliveryAddress,
-        deliveryLat: 6.6018,
-        deliveryLng: 3.3515,
+        ...(deliveryCoords
+          ? { deliveryLat: deliveryCoords.lat, deliveryLng: deliveryCoords.lng }
+          : {}),
         items: cartItems.map((item) => ({
           productId: item.product.id,
           quantity: item.quantity,
@@ -201,14 +202,10 @@ export default function MenuModal({
         ...(token ? {} : { phone: guestPhone }),
       };
 
-      const response = await fetch(
-        `${API_BASE_URL}/orders${token ? "" : "/guest-checkout"}`,
+      const response = await apiRequest(
+        `/orders${token ? "" : "/guest-checkout"}`,
         {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          },
           body: JSON.stringify(payload),
         },
       );
@@ -220,7 +217,10 @@ export default function MenuModal({
       }
 
       if (data.orderId || data.id) {
-        localStorage.setItem("latestOrderId", String(data.orderId || data.id));
+        setLatestOrder(
+          String(data.orderId || data.id),
+          token ? null : data.guestOrderToken || null,
+        );
       }
 
       if (data.authorizationUrl) {
@@ -268,7 +268,7 @@ export default function MenuModal({
           >
             <div className="sticky top-0 z-10 bg-white border-b border-gray-200 px-5 py-4 flex items-center justify-between">
               <div>
-                <p className="text-xs uppercase tracking-[0.2em] text-orange-500 font-semibold">
+                <p className="text-xs uppercase tracking-[0.2em] text-[#e63d00] font-semibold">
                   Menu
                 </p>
                 <h2 className="text-2xl font-bold text-gray-900">
@@ -287,6 +287,22 @@ export default function MenuModal({
               {loading ? (
                 <div className="text-center py-16 text-gray-500">
                   Loading menu...
+                </div>
+              ) : loadError ? (
+                <div className="py-16 text-center">
+                  <p className="text-sm text-gray-600 mb-4">{loadError}</p>
+                  {vendorId && (
+                    <button
+                      onClick={() => setMenuRetryNonce((n) => n + 1)}
+                      className="rounded-lg bg-[#ff4500] px-4 py-2 text-sm font-semibold text-white hover:bg-[#e63d00]"
+                    >
+                      Retry
+                    </button>
+                  )}
+                </div>
+              ) : categories.length === 0 ? (
+                <div className="py-16 text-center text-sm text-gray-500">
+                  No items are available from this vendor right now.
                 </div>
               ) : (
                 <div className="space-y-8">
@@ -326,17 +342,17 @@ export default function MenuModal({
                                   </div>
                                   <button
                                     onClick={() => addToCart(product)}
-                                    className="rounded-full bg-orange-500 p-2 text-white hover:bg-orange-600"
+                                    aria-label={`Add ${product.name} to cart`}
+                                    className="rounded-full bg-[#ff4500] p-2 text-white hover:bg-[#e63d00]"
                                   >
                                     <Plus className="w-4 h-4" />
                                   </button>
                                 </div>
 
                                 <div className="mt-3 flex items-center justify-between">
-                                  <div className="flex items-center gap-4 text-sm text-gray-600">
-                                    <span className="inline-flex items-center gap-1">
-                                      <IndianRupee className="w-4 h-4" />
-                                      {Number(product.price).toLocaleString()}
+                                  <div className="flex items-center gap-4 text-sm text-[#5f5a57]">
+                                    <span className="inline-flex items-center gap-1 font-semibold text-[#111111]">
+                                      {formatNaira(product.price)}
                                     </span>
                                     <span className="inline-flex items-center gap-1">
                                       <Clock className="w-4 h-4" />
@@ -372,14 +388,14 @@ export default function MenuModal({
               <div className="mb-3 rounded-2xl bg-gray-50 p-3">
                 <div className="flex items-center justify-between text-sm text-gray-600 mb-2">
                   <span className="inline-flex items-center gap-2">
-                    <ShoppingCart className="w-4 h-4 text-orange-500" />
+                    <ShoppingCart className="w-4 h-4 text-[#ff4500]" />
                     {cartItems.reduce(
                       (count, item) => count + item.quantity,
                       0,
                     )}{" "}
                     item(s)
                   </span>
-                  <span>₦{total.toLocaleString()}</span>
+                  <span className="font-bold text-[#111111]">{formatNaira(total)}</span>
                 </div>
 
                 {cartItems.map((item) => (
@@ -391,8 +407,8 @@ export default function MenuModal({
                       <span className="font-medium text-gray-800">
                         {item.product.name}
                       </span>
-                      <span className="text-xs text-gray-500">
-                        ₦{item.product.price.toLocaleString()}
+                      <span className="text-xs text-[#5f5a57]">
+                        {formatNaira(item.product.price)}
                       </span>
                     </div>
                     <div className="flex items-center gap-2">
@@ -416,27 +432,29 @@ export default function MenuModal({
                 ))}
               </div>
 
-              {!hasAccessToken && (
-                <div className="space-y-3 mb-3">
+              <div className="space-y-3 mb-3">
+                {!hasAccessToken && (
                   <input
                     type="tel"
                     value={guestPhone}
                     onChange={(event) => setGuestPhone(event.target.value)}
-                    placeholder="Guest phone: +2348123456789"
-                    className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm outline-none focus:border-orange-500"
+                    placeholder="Phone number: +2348123456789"
+                    aria-label="Phone number"
+                    className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm outline-none focus:border-[#ff4500]"
                   />
-                  <input
-                    type="text"
-                    value={deliveryAddress}
-                    onChange={(event) => setDeliveryAddress(event.target.value)}
-                    placeholder="Delivery address"
-                    className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm outline-none focus:border-orange-500"
-                  />
-                </div>
-              )}
+                )}
+                <input
+                  type="text"
+                  value={deliveryAddress}
+                  onChange={(event) => setDeliveryAddress(event.target.value)}
+                  placeholder="Delivery address"
+                  aria-label="Delivery address"
+                  className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm outline-none focus:border-[#ff4500]"
+                />
+              </div>
 
               {orderStatus && (
-                <div className="mb-3 rounded-lg border border-orange-200 bg-orange-50 px-3 py-2 text-xs text-orange-700">
+                <div className="mb-3 rounded-lg border border-[#ffd9c7] bg-[#fff2ea] px-3 py-2 text-xs text-[#a82b00]">
                   {orderStatus}
                 </div>
               )}
@@ -444,11 +462,11 @@ export default function MenuModal({
               <button
                 onClick={handleCheckout}
                 disabled={checkingOut || cartItems.length === 0}
-                className="w-full rounded-xl bg-orange-500 px-4 py-3 text-sm font-bold text-white disabled:bg-gray-300"
+                className="w-full rounded-xl bg-[#ff4500] px-4 py-3 text-sm font-bold text-white disabled:bg-gray-300"
               >
                 {checkingOut
                   ? "Processing..."
-                  : `Checkout • ₦${total.toLocaleString()}`}
+                  : `Checkout • ${formatNaira(total)}`}
               </button>
             </div>
           </motion.div>

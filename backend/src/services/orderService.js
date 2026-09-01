@@ -1,4 +1,5 @@
 import { initiateRefund } from "../utils/paystack.js";
+import { emitOrderStatusUpdate } from "./socketService.js";
 
 const CANCELLABLE_STATUSES = new Set(["PENDING"]);
 
@@ -26,6 +27,22 @@ async function triggerOrderRefund(order, reason) {
     };
   }
 
+  // Claim the refund atomically BEFORE contacting Paystack so concurrent
+  // paths (customer cancel vs vendor reject vs auto-kill worker) can never
+  // issue duplicate refunds for the same order. The claim is released if
+  // Paystack rejects the request so a later retry can still refund.
+  const claim = await getPrisma().Order.updateMany({
+    where: { id: order.id, refundInitiatedAt: null },
+    data: { refundInitiatedAt: new Date() },
+  });
+
+  if (claim.count === 0) {
+    return {
+      success: true,
+      alreadyRefunded: true,
+    };
+  }
+
   const refundResult = await initiateRefund({
     transactionId: order.paymentReference,
     amount: order.totalAmount,
@@ -33,6 +50,10 @@ async function triggerOrderRefund(order, reason) {
   });
 
   if (!refundResult.success) {
+    await getPrisma().Order.updateMany({
+      where: { id: order.id, refundCompletedAt: null },
+      data: { refundInitiatedAt: null },
+    });
     return refundResult;
   }
 
@@ -54,8 +75,11 @@ async function autoKillExpiredPendingOrder(order) {
     return order;
   }
 
-  const autoKilledOrder = await getPrisma().Order.update({
-    where: { id: order.id },
+  // Guarded transition: if the vendor accepted or the customer cancelled
+  // while this function ran, the update matches nothing and the order keeps
+  // its winner's state instead of being force-killed.
+  const killed = await getPrisma().Order.updateMany({
+    where: { id: order.id, status: "PENDING" },
     data: {
       status: "CANCELLED_AUTO_KILL",
       autoKilledAt: new Date(),
@@ -63,6 +87,16 @@ async function autoKillExpiredPendingOrder(order) {
       acceptanceDeadline: null,
       adminNotes: "Acceptance window expired before vendor action",
     },
+  });
+
+  if (killed.count === 0) {
+    return getPrisma().Order.findUnique({
+      where: { id: order.id },
+    });
+  }
+
+  const autoKilledOrder = await getPrisma().Order.findUnique({
+    where: { id: order.id },
   });
 
   const refundResult = await triggerOrderRefund(
@@ -76,9 +110,13 @@ async function autoKillExpiredPendingOrder(order) {
     );
   }
 
-  return getPrisma().Order.findUnique({
+  const finalOrder = await getPrisma().Order.findUnique({
     where: { id: order.id },
   });
+
+  emitOrderStatusUpdate(finalOrder);
+
+  return finalOrder;
 }
 
 async function autoKillExpiredPendingOrders(limit = 50) {
@@ -132,13 +170,38 @@ async function completeDeliveredOrder(orderId, notes = "Order payout unlocked") 
     };
   }
 
-  const completedOrder = await getPrisma().Order.update({
-    where: { id: orderId },
+  // Guarded so concurrent completion requests can only win once; loyalty
+  // crediting downstream then runs for exactly one completion.
+  const completed = await getPrisma().Order.updateMany({
+    where: { id: orderId, status: "DELIVERED" },
     data: {
       status: "COMPLETED",
       completedAt: new Date(),
       adminNotes: notes,
     },
+  });
+
+  if (completed.count === 0) {
+    const latest = await getPrisma().Order.findUnique({
+      where: { id: orderId },
+    });
+
+    if (latest && latest.status === "COMPLETED") {
+      return {
+        success: true,
+        alreadyCompleted: true,
+        order: latest,
+      };
+    }
+
+    return {
+      success: false,
+      error: `Cannot complete order in ${latest ? latest.status : "unknown"} status`,
+    };
+  }
+
+  const completedOrder = await getPrisma().Order.findUnique({
+    where: { id: orderId },
   });
 
   return {

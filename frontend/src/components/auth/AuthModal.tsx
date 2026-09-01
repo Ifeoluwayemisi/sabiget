@@ -3,9 +3,7 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { X, Phone, Lock, Mail } from "lucide-react";
-
-const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api/v1";
+import { apiRequest, storeAuthPayload } from "@/lib/api/client";
 
 const modalVariants = {
   hidden: { opacity: 0, scale: 0.95 },
@@ -81,21 +79,7 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
     }
   };
 
-  const storeTokens = (payload: {
-    accessToken?: string;
-    refreshToken?: string;
-    user?: unknown;
-  }) => {
-    if (payload.accessToken) {
-      localStorage.setItem("accessToken", payload.accessToken);
-    }
-    if (payload.refreshToken) {
-      localStorage.setItem("refreshToken", payload.refreshToken);
-    }
-    if (payload.user) {
-      localStorage.setItem("currentUser", JSON.stringify(payload.user));
-    }
-  };
+  const storeTokens = storeAuthPayload;
 
   const handlePhoneSubmit = async () => {
     if (!phone) {
@@ -107,9 +91,8 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
     setFeedback(null);
 
     try {
-      const response = await fetch(`${API_BASE_URL}/auth/send-otp`, {
+      const response = await apiRequest("/auth/send-otp", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ phone }),
       });
 
@@ -148,9 +131,8 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
     setFeedback(null);
 
     try {
-      const response = await fetch(`${API_BASE_URL}/auth/verify-otp`, {
+      const response = await apiRequest("/auth/verify-otp", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ phone, code: otp }),
       });
 
@@ -187,9 +169,8 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
     setFeedback(null);
 
     try {
-      const response = await fetch(`${API_BASE_URL}/auth/login`, {
+      const response = await apiRequest("/auth/login", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           phone: memberForm.phone,
           password: memberForm.password,
@@ -229,9 +210,8 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
     setFeedback(null);
 
     try {
-      const response = await fetch(`${API_BASE_URL}/auth/vendor/login`, {
+      const response = await apiRequest("/auth/vendor/login", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           email: vendorForm.email,
           password: vendorForm.password,

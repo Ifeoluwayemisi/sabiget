@@ -1,130 +1,88 @@
 "use client";
 
-import { motion } from "framer-motion";
-import { Star, MapPin, Clock } from "lucide-react";
+import { ArrowRight, Clock3, MapPin, Star, UtensilsCrossed } from "lucide-react";
+import type { VendorCardData } from "@/features/home/data/vendors";
 
 interface VendorCardProps {
-  name: string;
-  image: string;
-  rating: number;
-  reviews: number;
-  distance: string;
-  deliveryTime: string;
-  category: string;
+  vendor: VendorCardData;
+  onSelect: (vendor: VendorCardData) => void;
 }
 
-const cardVariants = {
-  hidden: { opacity: 0, y: 20 },
-  visible: {
-    opacity: 1,
-    y: 0,
-    transition: { duration: 0.5, ease: "easeOut" },
-  },
-};
+export default function VendorCard({ vendor, onSelect }: VendorCardProps) {
+  const { name, image, rating, reviews, distanceKm, deliveryMinutes, category } = vendor;
 
-const hoverVariants = {
-  hover: {
-    y: -8,
-    boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.1)",
-    transition: { type: "spring", stiffness: 300, damping: 10 },
-  },
-};
-
-const imageVariants = {
-  hover: {
-    scale: 1.05,
-    transition: { duration: 0.3 },
-  },
-};
-
-export default function VendorCard({
-  name,
-  image,
-  rating,
-  reviews,
-  distance,
-  deliveryTime,
-  category,
-}: VendorCardProps) {
   return (
-    <motion.div
-      className="rounded-lg overflow-hidden bg-white shadow-md hover:shadow-xl transition-shadow"
-      variants={cardVariants}
-      whileHover="hover"
-      animate="visible"
-      initial="hidden"
-      transition={{ duration: 0.5 }}
-    >
-      <motion.div
-        className="relative h-40 overflow-hidden bg-gray-200"
-        variants={imageVariants}
-      >
-        <img src={image} alt={name} className="w-full h-full object-cover" />
-        <div className="absolute inset-0 bg-black/0 hover:bg-black/10 transition-all" />
-
-        <motion.div
-          className="absolute top-2 right-2 bg-orange-500 text-white px-3 py-1 rounded-full text-sm font-semibold"
-          initial={{ opacity: 0, x: 20 }}
-          whileInView={{ opacity: 1, x: 0 }}
-          viewport={{ once: true }}
-        >
-          {category}
-        </motion.div>
-      </motion.div>
-
-      <div className="p-4">
-        <h3 className="text-lg font-bold text-gray-900 mb-2">{name}</h3>
-
-        <div className="flex items-center gap-1 mb-3">
-          <div className="flex items-center">
-            {[...Array(5)].map((_, i) => (
-              <Star
-                key={i}
-                className={`w-4 h-4 ${
-                  i < Math.floor(rating)
-                    ? "fill-yellow-400 text-yellow-400"
-                    : "text-gray-300"
-                }`}
-              />
-            ))}
+    <article className="group relative flex h-full flex-col overflow-hidden rounded-2xl border border-[var(--color-line)] bg-white shadow-[0_1px_2px_rgba(26,26,26,0.05)] transition-all duration-300 ease-out hover:-translate-y-1 hover:shadow-[0_18px_40px_-18px_rgba(153,61,17,0.28)] focus-within:-translate-y-1 focus-within:shadow-[0_18px_40px_-18px_rgba(153,61,17,0.28)]">
+      <div className="relative aspect-[4/3] overflow-hidden bg-[#f4efeb]">
+        {image ? (
+          // Vendor images come from arbitrary origins, so next/image would
+          // require an allow-list; a fixed-aspect container prevents layout shift.
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={image}
+            alt=""
+            loading="lazy"
+            className="h-full w-full object-cover transition-transform duration-500 ease-out group-hover:scale-[1.04]"
+          />
+        ) : (
+          <div className="flex h-full w-full items-center justify-center bg-linear-to-br from-[#ffefe8] to-[#ffe0d1] text-[#c96a3f]">
+            <UtensilsCrossed className="h-10 w-10" aria-hidden="true" />
           </div>
-          <span className="text-sm font-semibold text-gray-700 ml-1">
-            {rating}
-          </span>
-          <span className="text-xs text-gray-500">({reviews})</span>
-        </div>
+        )}
 
-        <div className="space-y-2 border-t pt-3">
-          <motion.div
-            className="flex items-center gap-2 text-sm text-gray-600"
-            initial={{ opacity: 0, x: -10 }}
-            whileInView={{ opacity: 1, x: 0 }}
-            viewport={{ once: true }}
-          >
-            <MapPin className="w-4 h-4 text-orange-500" />
-            <span>{distance} away</span>
-          </motion.div>
-
-          <motion.div
-            className="flex items-center gap-2 text-sm text-gray-600"
-            initial={{ opacity: 0, x: -10 }}
-            whileInView={{ opacity: 1, x: 0 }}
-            transition={{ delay: 0.1 }}
-            viewport={{ once: true }}
-          >
-            <Clock className="w-4 h-4 text-orange-500" />
-            <span>{deliveryTime} delivery</span>
-          </motion.div>
-        </div>
-
-        <motion.button
-          className="w-full mt-4 bg-orange-500 hover:bg-orange-600 text-white py-2 rounded-lg font-semibold transition-all"
-          whileHover={{ scale: 1.02 }}
-          whileTap={{ scale: 0.98 }}
-        >
-          View Menu
-        </motion.button>
+        <span className="absolute left-3 top-3 inline-flex items-center rounded-full bg-white/95 px-3 py-1 text-xs font-semibold tracking-wide text-[#5f5a57] shadow-sm">
+          {category}
+        </span>
       </div>
-    </motion.div>
+
+      <div className="flex flex-1 flex-col gap-3 p-4 sm:p-5">
+        <div className="flex items-start justify-between gap-3">
+          <h3 className="text-lg font-bold leading-snug text-[#111111]">{name}</h3>
+
+          {rating !== null ? (
+            <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-[#fff4ec] px-2 py-0.5 text-sm font-semibold text-[#b3400f]">
+              <Star className="h-3.5 w-3.5 fill-current" aria-hidden="true" />
+              {rating.toFixed(1)}
+              {reviews > 0 && (
+                <span className="sr-only">{` based on ${reviews} reviews`}</span>
+              )}
+            </span>
+          ) : (
+            <span className="shrink-0 rounded-full bg-[#f4efeb] px-2 py-0.5 text-xs font-semibold text-[#5f5a57]">
+              New
+            </span>
+          )}
+        </div>
+
+        <div className="mt-auto flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-[#666666]">
+          <span className="inline-flex items-center gap-1.5">
+            <MapPin className="h-4 w-4 text-[#ff4500]" aria-hidden="true" />
+            {distanceKm > 0 ? `${distanceKm.toFixed(1)} km away` : "Nearby"}
+          </span>
+          {deliveryMinutes !== null && (
+            <span className="inline-flex items-center gap-1.5">
+              <Clock3 className="h-4 w-4 text-[#ff4500]" aria-hidden="true" />
+              ~{deliveryMinutes} min
+            </span>
+          )}
+        </div>
+
+        <div className="flex items-center justify-between border-t border-[var(--color-line)] pt-3 text-sm font-semibold text-[#111111]">
+          View menu
+          <ArrowRight
+            className="h-4 w-4 text-[#ff4500] transition-transform duration-300 group-hover:translate-x-1"
+            aria-hidden="true"
+          />
+        </div>
+      </div>
+
+      <button
+        type="button"
+        onClick={() => onSelect(vendor)}
+        className="absolute inset-0 z-10 rounded-2xl focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-[rgba(255,69,0,0.45)]"
+      >
+        <span className="sr-only">{`View menu from ${name}`}</span>
+      </button>
+    </article>
   );
 }

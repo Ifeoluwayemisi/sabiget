@@ -7,6 +7,7 @@ import {
 } from "../middleware/auth.js";
 import { createSubAccount } from "../utils/paystack.js";
 import { hashPassword } from "../utils/password.js";
+import { vendorRegistrationLimiter } from "../middleware/rateLimiter.js";
 import {
   findNearbyVendors,
   getLGAFromCoordinates,
@@ -312,9 +313,12 @@ router.get("/:id/menu", async (req, res) => {
  * POST /api/vendors/register
  * Register a new vendor
  */
-router.post("/register", async (req, res) => {
-  try {
-    const { name, phone, latitude, longitude, email, password } = req.body;
+router.post(
+  "/register",
+  vendorRegistrationLimiter,
+  async (req, res) => {
+    try {
+      const { name, phone, latitude, longitude, email, password } = req.body;
 
     if (
       !name ||
@@ -348,10 +352,25 @@ router.post("/register", async (req, res) => {
 
     const hashedPassword = await hashPassword(password);
 
-    let user = await global.prisma.User.findUnique({ where: { phone } });
-    if (user) {
+    const existingUser = await global.prisma.User.findUnique({
+      where: { phone },
+    });
+
+    // Never overwrite an established account: knowing a phone number must not
+    // grant control of it. Only passwordless GUEST shadow accounts may be
+    // elevated during onboarding.
+    if (existingUser && existingUser.role !== "GUEST") {
+      return res.status(409).json({
+        success: false,
+        error:
+          "An account with this phone number already exists. Please sign in or contact support.",
+      });
+    }
+
+    let user;
+    if (existingUser) {
       user = await global.prisma.User.update({
-        where: { id: user.id },
+        where: { id: existingUser.id },
         data: { role: "VENDOR", password: hashedPassword, email, name },
       });
     } else {

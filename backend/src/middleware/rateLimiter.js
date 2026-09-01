@@ -52,4 +52,22 @@ const apiLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-export { otpLimiter, loginLimiter, checkoutLimiter, apiLimiter };
+/**
+ * Vendor Registration Rate Limiter
+ * Limit: 5 registration attempts per IP per hour
+ */
+const vendorRegistrationLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 5,
+  message: "Too many vendor registration attempts. Try again later.",
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+export {
+  otpLimiter,
+  loginLimiter,
+  checkoutLimiter,
+  apiLimiter,
+  vendorRegistrationLimiter,
+};

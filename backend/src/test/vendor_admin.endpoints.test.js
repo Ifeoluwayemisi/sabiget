@@ -198,6 +198,53 @@ describe("vendor and admin endpoint verification", () => {
     expect(dashboardResponse.status).toBe(200);
   });
 
+  it("rejects vendor registration that would take over an existing non-guest account", async () => {
+    prisma.Vendor.findFirst.mockResolvedValue(null);
+    prisma.User.findUnique.mockResolvedValue({ id: "user_member", role: "MEMBER" });
+
+    const response = await vendorServer.request("/register", {
+      method: "POST",
+      body: JSON.stringify({
+        name: "Hijack Kitchen",
+        phone: "+2348022222222",
+        latitude: 6.5,
+        longitude: 3.3,
+        email: "hijack@example.com",
+        password: "securePass123",
+      }),
+    });
+
+    expect(response.status).toBe(409);
+    expect(prisma.User.update).not.toHaveBeenCalled();
+    expect(prisma.User.create).not.toHaveBeenCalled();
+    expect(prisma.Vendor.create).not.toHaveBeenCalled();
+  });
+
+  it("elevates a passwordless GUEST shadow account during vendor onboarding", async () => {
+    prisma.Vendor.findFirst.mockResolvedValue(null);
+    prisma.User.findUnique.mockResolvedValue({ id: "user_guest", role: "GUEST" });
+    prisma.User.update.mockResolvedValue({ id: "user_guest" });
+    prisma.Vendor.create.mockResolvedValue({ id: "vendor_new", lga: "IKEJA" });
+
+    const response = await vendorServer.request("/register", {
+      method: "POST",
+      body: JSON.stringify({
+        name: "Guest Turned Vendor",
+        phone: "+2348033333333",
+        latitude: 6.5,
+        longitude: 3.3,
+        email: "guestvendor@example.com",
+        password: "securePass123",
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(prisma.User.update).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: "user_guest" } }),
+    );
+    expect(prisma.User.create).not.toHaveBeenCalled();
+  });
+
   it("verifies admin dashboard and moderation endpoints", async () => {
     mockCurrentUser = { userId: "admin_1", role: "ADMIN" };
 

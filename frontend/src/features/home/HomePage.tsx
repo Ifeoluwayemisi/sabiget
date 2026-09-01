@@ -1,277 +1,543 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { motion } from "framer-motion";
-import Hero from "@/components/landing/Hero";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { motion, MotionConfig } from "framer-motion";
+import {
+  AlertTriangle,
+  ArrowRight,
+  Loader2,
+  MapPin,
+  RotateCcw,
+  Search,
+} from "lucide-react";
+import Link from "next/link";
+
+import Hero, { type LocationStatus } from "@/components/landing/Hero";
 import HowItWorks from "@/components/landing/HowItWorks";
+import TrustSection from "@/components/home/TrustSection";
+import VendorCTA from "@/components/home/VendorCTA";
+import FinalCTA from "@/components/home/FinalCTA";
 import AuthModal from "@/components/auth/AuthModal";
 import VendorCard from "@/components/landing/VendorCard";
 import Footer from "@/components/layout/Footer";
 import MenuModal from "@/components/cart/MenuModal";
 import OrderStatusCard from "@/components/order/OrderStatusCard";
-import { API_BASE_URL } from "@/lib/api/client";
 import {
-  sampleVendors,
-  type VendorCardData,
-} from "@/features/home/data/vendors";
+  fetchNearbyVendors,
+  NearbyVendorsError,
+} from "@/lib/api/vendors";
+import {
+  getAccessToken,
+  logout as logoutSession,
+  subscribeToAuth,
+} from "@/lib/api/client";
+import { closeSocket } from "@/lib/socket";
+import { getLatestOrderId, subscribeToLatestOrder } from "@/lib/orderTracker";
+import type { VendorCardData } from "@/features/home/data/vendors";
+
+const DISCOVERY_RADIUS_KM = 5;
+
+const geoOptions: PositionOptions = {
+  enableHighAccuracy: true,
+  timeout: 10000,
+  maximumAge: 60000,
+};
+
+const cardStagger = {
+  hidden: {},
+  visible: { transition: { staggerChildren: 0.07 } },
+};
+
+const cardItem = {
+  hidden: { opacity: 0, y: 22 },
+  visible: {
+    opacity: 1,
+    y: 0,
+    transition: { duration: 0.55, ease: [0.22, 1, 0.36, 1] as const },
+  },
+};
+
+function SkeletonCard() {
+  return (
+    <div
+      className="overflow-hidden rounded-2xl border border-[var(--color-line)] bg-white"
+      aria-hidden="true"
+    >
+      <div className="aspect-[4/3] animate-pulse bg-[#f4efeb]" />
+      <div className="space-y-3 p-5">
+        <div className="h-5 w-3/4 animate-pulse rounded-full bg-[#f4efeb]" />
+        <div className="h-4 w-1/2 animate-pulse rounded-full bg-[#f7f3f0]" />
+        <div className="h-4 w-2/3 animate-pulse rounded-full bg-[#f7f3f0]" />
+      </div>
+    </div>
+  );
+}
 
 export default function HomePage() {
   const [isAuthOpen, setIsAuthOpen] = useState(false);
+  // Session presence reacts to login/logout in this tab via the API client's
+  // auth pub/sub (the storage event only fires across tabs).
+  const signedIn = useSyncExternalStore(
+    subscribeToAuth,
+    () => Boolean(getAccessToken()),
+    () => false,
+  );
   const [selectedVendor, setSelectedVendor] = useState<{
     id: string | null;
     name: string;
   } | null>(null);
-  const [vendors, setVendors] = useState<VendorCardData[]>(sampleVendors);
-  const [loadingVendors, setLoadingVendors] = useState(false);
-  const [liveOrderId, setLiveOrderId] = useState<string | null>(null);
+  const [liveOrderId, setLiveOrderId] = useState<string | null>(() =>
+    // Safe during SSR: getLatestOrderId returns null without a window.
+    getLatestOrderId(),
+  );
 
-  useEffect(() => {
-    const syncLiveOrder = () => {
-      setLiveOrderId(localStorage.getItem("latestOrderId"));
-    };
+  const [locationStatus, setLocationStatus] = useState<LocationStatus>("idle");
+  const [coords, setCoords] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [vendors, setVendors] = useState<VendorCardData[] | null>(null);
+  const [vendorsError, setVendorsError] = useState<string | null>(null);
+  const [fetchNonce, setFetchNonce] = useState(0);
 
-    syncLiveOrder();
-    window.addEventListener("storage", syncLiveOrder);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedArea, setSelectedArea] = useState<string | null>(null);
 
-    return () => {
-      window.removeEventListener("storage", syncLiveOrder);
-    };
+  const abortRef = useRef<AbortController | null>(null);
+
+  const resetDiscoveryFilters = useCallback(() => {
+    setSearchQuery("");
+    setSelectedArea(null);
   }, []);
 
   useEffect(() => {
-    const token = localStorage.getItem("accessToken");
-    if (!token) {
-      setVendors(sampleVendors);
+    // setLatestOrder notifies this tab directly, so the live-order section
+    // appears as soon as checkout succeeds (the storage event alone only
+    // fires across tabs).
+    return subscribeToLatestOrder(() => {
+      setLiveOrderId(getLatestOrderId());
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!coords) return;
+
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    fetchNearbyVendors({
+      latitude: coords.latitude,
+      longitude: coords.longitude,
+      radiusKm: DISCOVERY_RADIUS_KM,
+      signal: controller.signal,
+    })
+      .then((mapped) => {
+        setVendors(mapped);
+      })
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return;
+        setVendorsError(
+          error instanceof NearbyVendorsError
+            ? error.message
+            : "We couldn't load nearby vendors right now.",
+        );
+      });
+
+    return () => {
+      controller.abort();
+    };
+  }, [coords, fetchNonce]);
+
+  const scrollToVendors = useCallback(() => {
+    document.getElementById("vendors")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, []);
+
+  const requestLocation = useCallback(() => {
+    if (!("geolocation" in navigator)) {
+      setLocationStatus("unavailable");
       return;
     }
 
-    const fetchNearbyVendors = async () => {
-      setLoadingVendors(true);
+    setLocationStatus("locating");
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setLocationStatus("ready");
+        setVendors(null);
+        setVendorsError(null);
+        resetDiscoveryFilters();
+        setCoords({
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+        });
+      },
+      (error) => {
+        setLocationStatus(
+          error.code === error.PERMISSION_DENIED ? "denied" : "unavailable",
+        );
+      },
+      geoOptions,
+    );
+  }, [resetDiscoveryFilters]);
 
-      try {
-        if (navigator.geolocation) {
-          navigator.geolocation.getCurrentPosition(
-            async (position) => {
-              const { latitude, longitude } = position.coords;
-              const response = await fetch(
-                `${API_BASE_URL}/customers/nearby-vendors?latitude=${latitude}&longitude=${longitude}&radius=5`,
-                {
-                  headers: {
-                    Authorization: `Bearer ${token}`,
-                    "Content-Type": "application/json",
-                  },
-                },
-              );
+  const handleFindFood = useCallback(() => {
+    if (coords === null && locationStatus !== "locating") {
+      requestLocation();
+    }
+    scrollToVendors();
+  }, [coords, locationStatus, requestLocation, scrollToVendors]);
 
-              if (!response.ok) {
-                setVendors(sampleVendors);
-                return;
-              }
+  const retryDiscovery = useCallback(() => {
+    resetDiscoveryFilters();
+    if (coords) {
+      setVendors(null);
+      setVendorsError(null);
+      setFetchNonce((nonce) => nonce + 1);
+    } else {
+      requestLocation();
+    }
+    scrollToVendors();
+  }, [coords, requestLocation, resetDiscoveryFilters, scrollToVendors]);
 
-              const data = await response.json();
-              const mapped = (data.vendors || []).map((vendor: any) => ({
-                name: vendor.name,
-                image:
-                  vendor.bannerImage ||
-                  vendor.logo ||
-                  "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=400&h=250&fit=crop",
-                rating: Number(vendor.averageRating || 4.5),
-                reviews: Number(vendor.totalReviews || 0),
-                distance: `${Number(vendor.distanceKm || 0).toFixed(1)} km`,
-                deliveryTime: `${vendor.estimatedDeliveryMinutes || 30} mins`,
-                category: vendor.lga || "Local",
-              }));
-
-              setVendors(mapped.length > 0 ? mapped : sampleVendors);
-            },
-            () => setVendors(sampleVendors),
-            { enableHighAccuracy: true, timeout: 10000 },
-          );
-        } else {
-          setVendors(sampleVendors);
-        }
-      } catch (error) {
-        console.error("Nearby vendors fetch failed:", error);
-        setVendors(sampleVendors);
-      } finally {
-        setLoadingVendors(false);
-      }
-    };
-
-    fetchNearbyVendors();
+  const openVendor = useCallback((vendor: VendorCardData) => {
+    setSelectedVendor({ id: vendor.id, name: vendor.name });
   }, []);
 
+  // Areas are derived from the fetched vendors' LGA ("category") — pure UX
+  // filtering over already-approved backend results, not a second discovery.
+  const areas = useMemo(() => {
+    const seen = new Set<string>();
+    const list: string[] = [];
+    for (const vendor of vendors ?? []) {
+      const area = vendor.category.trim();
+      if (area && !seen.has(area)) {
+        seen.add(area);
+        list.push(area);
+      }
+    }
+    return list.sort((a, b) => a.localeCompare(b));
+  }, [vendors]);
+
+  const visibleVendors = useMemo(() => {
+    if (!vendors) return null;
+    const query = searchQuery.trim().toLowerCase();
+    return vendors.filter((vendor) => {
+      if (query && !vendor.name.toLowerCase().includes(query)) return false;
+      if (selectedArea && vendor.category !== selectedArea) return false;
+      return true;
+    });
+  }, [vendors, searchQuery, selectedArea]);
+
+  const handleSignOut = useCallback(async () => {
+    // Revokes the refresh token server-side and clears local session state.
+    // The realtime socket is tied to the session identity, so it is torn
+    // down with the credentials and recreated on the next sign-in.
+    await logoutSession();
+    closeSocket();
+    setIsAuthOpen(false);
+  }, []);
+
+  const isDiscovering =
+    locationStatus === "locating" ||
+    (coords !== null && vendors === null && vendorsError === null);
+
+  const showDiscoveryPrompt =
+    !isDiscovering && coords === null && vendors === null;
+
   return (
-    <>
+    <MotionConfig reducedMotion="user">
       <motion.nav
-        className="sticky top-0 z-40 border-b border-gray-100 backdrop-blur-md bg-white/80"
-        initial={{ y: -100 }}
-        animate={{ y: 0 }}
-        transition={{ duration: 0.5 }}
+        className="sticky top-0 z-40 border-b border-[var(--color-line)] bg-white/85 backdrop-blur-md"
+        initial={{ y: -16, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        transition={{ duration: 0.45, ease: "easeOut" }}
       >
-        <div className="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <span className="text-3xl">🍽️</span>
-            <span className="font-black text-2xl text-gray-900">SabiGet</span>
+        <div className="sabiget-shell flex h-16 items-center justify-between">
+          <Link href="/" className="flex items-center gap-2.5" aria-label="SabiGet home">
+            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#ff4500] text-base font-black text-white shadow-[0_6px_16px_-6px_rgba(255,69,0,0.7)]">
+              S
+            </span>
+            <span className="text-xl font-extrabold tracking-tight text-[#111111]">
+              SabiGet
+            </span>
+          </Link>
+
+          <div className="hidden items-center gap-7 md:flex">
+            <a href="#vendors" className="text-sm font-semibold text-[#666666] transition-colors hover:text-[#e63d00]">
+              Vendors
+            </a>
+            <a href="#how-it-works" className="text-sm font-semibold text-[#666666] transition-colors hover:text-[#e63d00]">
+              How it works
+            </a>
+            <a href="#for-vendors" className="text-sm font-semibold text-[#666666] transition-colors hover:text-[#e63d00]">
+              For vendors
+            </a>
           </div>
 
-          <motion.button
-            onClick={() => setIsAuthOpen(true)}
-            className="px-6 py-2 bg-linear-to-r from-orange-500 to-amber-600 text-white font-bold rounded-lg hover:shadow-lg transition-all duration-300"
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
-          >
-            Sign In
-          </motion.button>
+          <div className="flex items-center gap-2 sm:gap-3">
+            <Link
+              href="/orders"
+              className="inline-flex min-h-[44px] items-center rounded-full px-4 py-2 text-sm font-bold text-[#111111] transition-colors hover:bg-[#ffefe8] hover:text-[#e63d00]"
+            >
+              Orders
+            </Link>
+            {signedIn ? (
+              <button
+                type="button"
+                onClick={handleSignOut}
+                className="inline-flex min-h-[44px] items-center rounded-full border border-[var(--color-line-strong)] px-5 py-2.5 text-sm font-bold text-[#111111] transition-all duration-200 hover:-translate-y-0.5 hover:border-[rgba(26,26,26,0.22)]"
+              >
+                Sign out
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setIsAuthOpen(true)}
+                className="inline-flex min-h-[44px] items-center rounded-full bg-[#ff4500] px-5 py-2.5 text-sm font-bold text-white shadow-[0_8px_20px_-8px_rgba(255,69,0,0.65)] transition-all duration-200 hover:-translate-y-0.5 hover:bg-[#e63d00]"
+              >
+                Sign in
+              </button>
+            )}
+          </div>
         </div>
       </motion.nav>
 
-      <Hero onGetStarted={() => setIsAuthOpen(true)} />
+      <Hero locationStatus={locationStatus} onFindFood={handleFindFood} />
 
-      <section className="py-20 px-4 bg-gray-50">
-        <motion.div
-          className="max-w-6xl mx-auto"
-          initial={{ opacity: 0 }}
-          whileInView={{ opacity: 1 }}
-          viewport={{ once: true }}
-          transition={{ duration: 0.6 }}
-        >
-          <motion.div
-            className="mb-12"
-            initial={{ opacity: 0, y: 20 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            transition={{ duration: 0.6 }}
-          >
-            <h2 className="text-4xl md:text-5xl font-bold text-gray-900 mb-4">
-              Featured Vendors Near You
-            </h2>
-            <p className="text-xl text-gray-600">
-              Browse top-rated local vendors and get your favorite meals
-              delivered fast
+      <section id="vendors" className="scroll-mt-20 bg-white py-20 sm:py-24">
+        <div className="sabiget-shell">
+          <div className="mx-auto max-w-2xl text-center">
+            <p className="sabiget-badge sabiget-badge-brand mx-auto">
+              Nearby discovery
             </p>
-          </motion.div>
+            <h2 className="mt-4 text-balance text-3xl font-extrabold tracking-tight text-[#111111] sm:text-4xl lg:text-[2.75rem] lg:leading-tight">
+              Good food is closer than you think.
+            </h2>
+            <p className="mt-4 text-lg leading-relaxed text-[#666666]">
+              Real kitchens around you, sorted by distance — no guesswork.
+            </p>
+          </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-            {vendors.map((vendor, idx) => (
+          <div className="mt-14">
+            {isDiscovering ? (
+              <>
+                <p
+                  className="mb-8 flex items-center justify-center gap-2 text-sm font-medium text-[#666666]"
+                  role="status"
+                >
+                  <Loader2 className="h-4 w-4 animate-spin text-[#ff4500]" aria-hidden="true" />
+                  Finding food near you...
+                </p>
+                <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
+                  {Array.from({ length: 4 }).map((_, index) => (
+                    <SkeletonCard key={index} />
+                  ))}
+                </div>
+              </>
+            ) : showDiscoveryPrompt ? (
               <motion.div
-                key={`${vendor.name}-${idx}`}
                 initial={{ opacity: 0, y: 20 }}
                 whileInView={{ opacity: 1, y: 0 }}
                 viewport={{ once: true }}
-                transition={{ delay: idx * 0.1, duration: 0.5 }}
+                transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
+                className="mx-auto max-w-md rounded-2xl border border-[var(--color-line)] bg-white p-8 text-center shadow-[0_18px_40px_-18px_rgba(153,61,17,0.28)]"
               >
-                <div
-                  onClick={() =>
-                    setSelectedVendor({
-                      id: `vendor-${idx}`,
-                      name: vendor.name,
-                    })
-                  }
+                <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-[#ffefe8] text-[#e63d00]">
+                  <Search className="h-7 w-7" aria-hidden="true" />
+                </span>
+                <h3 className="mt-5 text-xl font-bold text-[#111111]">
+                  What&apos;s good around you?
+                </h3>
+                <p className="mt-2 text-sm leading-relaxed text-[#666666]">
+                  Share your location once and we&apos;ll surface verified food
+                  vendors within {DISCOVERY_RADIUS_KM} km of you.
+                </p>
+                {locationStatus === "denied" && (
+                  <p className="mt-3 text-sm font-medium text-[#b3400f]" role="alert">
+                    We couldn&apos;t access your location.
+                  </p>
+                )}
+                <button
+                  type="button"
+                  onClick={requestLocation}
+                  className="mt-6 inline-flex min-h-[48px] items-center justify-center gap-2 rounded-full bg-[#ff4500] px-6 py-3 text-sm font-bold text-white shadow-[0_10px_28px_-10px_rgba(255,69,0,0.55)] transition-all duration-200 hover:-translate-y-0.5 hover:bg-[#e63d00]"
                 >
-                  <VendorCard {...vendor} />
-                </div>
+                  <MapPin className="h-4.5 w-4.5" aria-hidden="true" />
+                  Use my location
+                </button>
+                <p className="mt-4 text-xs leading-relaxed text-[#8a8a8a]">
+                  Location is only used to find vendors nearby. You can keep
+                  exploring without it.
+                </p>
               </motion.div>
-            ))}
+            ) : vendorsError ? (
+              <div className="mx-auto max-w-md rounded-2xl border border-[var(--color-line)] bg-white p-8 text-center shadow-sm">
+                <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-[#fff4ec] text-[#b3400f]">
+                  <AlertTriangle className="h-7 w-7" aria-hidden="true" />
+                </span>
+                <h3 className="mt-5 text-xl font-bold text-[#111111]">
+                  Something went wrong
+                </h3>
+                <p className="mt-2 text-sm leading-relaxed text-[#666666]">
+                  {vendorsError}
+                </p>
+                <button
+                  type="button"
+                  onClick={retryDiscovery}
+                  className="mt-6 inline-flex min-h-[48px] items-center justify-center gap-2 rounded-full border border-[var(--color-line-strong)] px-6 py-3 text-sm font-bold text-[#111111] transition-all duration-200 hover:-translate-y-0.5 hover:border-[rgba(26,26,26,0.22)]"
+                >
+                  <RotateCcw className="h-4 w-4" aria-hidden="true" />
+                  Try again
+                </button>
+              </div>
+            ) : vendors !== null && vendors.length === 0 ? (
+              <div className="mx-auto max-w-md rounded-2xl border border-[var(--color-line)] bg-white p-8 text-center shadow-sm">
+                <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-[#ffefe8] text-[#e63d00]">
+                  <MapPin className="h-7 w-7" aria-hidden="true" />
+                </span>
+                <h3 className="mt-5 text-xl font-bold text-[#111111]">
+                  Nothing tasty nearby yet.
+                </h3>
+                <p className="mt-2 text-sm leading-relaxed text-[#666666]">
+                  No verified vendors are within {DISCOVERY_RADIUS_KM} km of you
+                  right now. Check back soon — new kitchens join regularly.
+                </p>
+                <button
+                  type="button"
+                  onClick={retryDiscovery}
+                  className="mt-6 inline-flex min-h-[48px] items-center justify-center gap-2 rounded-full border border-[var(--color-line-strong)] px-6 py-3 text-sm font-bold text-[#111111] transition-all duration-200 hover:-translate-y-0.5 hover:border-[rgba(26,26,26,0.22)]"
+                >
+                  <RotateCcw className="h-4 w-4" aria-hidden="true" />
+                  Check again
+                </button>
+              </div>
+            ) : vendors !== null && vendors.length > 0 ? (
+              <>
+                <p className="mb-8 flex items-center justify-center gap-2 text-sm font-medium text-[#2e7d32]" role="status">
+                  <MapPin className="h-4 w-4" aria-hidden="true" />
+                  Food near you · within {DISCOVERY_RADIUS_KM} km
+                </p>
+
+                <div className="mx-auto mb-8 max-w-xl">
+                  <label className="relative block">
+                    <span className="sr-only">Search nearby vendors</span>
+                    <Search
+                      className="pointer-events-none absolute left-4 top-1/2 h-4.5 w-4.5 -translate-y-1/2 text-[#8a8a8a]"
+                      aria-hidden="true"
+                    />
+                    <input
+                      type="search"
+                      value={searchQuery}
+                      onChange={(event) => setSearchQuery(event.target.value)}
+                      placeholder="Search vendors by name"
+                      className="min-h-[48px] w-full rounded-full border border-[var(--color-line-strong)] bg-white pl-11 pr-4 text-sm text-[#111111] outline-none placeholder:text-[#8a8a8a] focus:border-[#ff4500] focus:ring-4 focus:ring-[rgba(255,69,0,0.14)]"
+                    />
+                  </label>
+
+                  {areas.length > 0 && (
+                    <div className="mt-3 flex flex-wrap justify-center gap-2" role="group" aria-label="Filter vendors by area">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedArea(null)}
+                        aria-pressed={selectedArea === null}
+                        className={`touch-target inline-flex items-center rounded-full px-4 py-1.5 text-xs font-bold transition-colors ${
+                          selectedArea === null
+                            ? "bg-[#ff4500] text-white"
+                            : "border border-[var(--color-line-strong)] bg-white text-[#666666] hover:border-[#ff4500] hover:text-[#e63d00]"
+                        }`}
+                      >
+                        All areas
+                      </button>
+                      {areas.map((area) => (
+                        <button
+                          key={area}
+                          type="button"
+                          onClick={() =>
+                            setSelectedArea((current) =>
+                              current === area ? null : area,
+                            )
+                          }
+                          aria-pressed={selectedArea === area}
+                          className={`touch-target inline-flex items-center rounded-full px-4 py-1.5 text-xs font-bold transition-colors ${
+                            selectedArea === area
+                              ? "bg-[#ff4500] text-white"
+                              : "border border-[var(--color-line-strong)] bg-white text-[#666666] hover:border-[#ff4500] hover:text-[#e63d00]"
+                          }`}
+                        >
+                          {area}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {visibleVendors !== null && visibleVendors.length === 0 ? (
+                  <div className="mx-auto max-w-md rounded-2xl border border-[var(--color-line)] bg-white p-8 text-center shadow-sm">
+                    <p className="text-sm leading-relaxed text-[#666666]">
+                      No vendors match your search. Try a different name or
+                      area.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={resetDiscoveryFilters}
+                      className="mt-5 inline-flex min-h-[44px] items-center justify-center rounded-full border border-[var(--color-line-strong)] px-5 py-2.5 text-sm font-bold text-[#111111] transition-all duration-200 hover:-translate-y-0.5 hover:border-[rgba(26,26,26,0.22)]"
+                    >
+                      Clear filters
+                    </button>
+                  </div>
+                ) : (
+                  <motion.div
+                    variants={cardStagger}
+                    initial="hidden"
+                    whileInView="visible"
+                    viewport={{ once: true, margin: "-60px" }}
+                    className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4"
+                  >
+                    {(visibleVendors ?? []).map((vendor) => (
+                      <motion.div key={vendor.id} variants={cardItem}>
+                        <VendorCard vendor={vendor} onSelect={openVendor} />
+                      </motion.div>
+                    ))}
+                  </motion.div>
+                )}
+              </>
+            ) : null}
           </div>
-
-          {loadingVendors && (
-            <div className="mt-6 text-center text-sm text-gray-500">
-              Finding vendors near you...
-            </div>
-          )}
-
-          <motion.div
-            className="mt-12 text-center"
-            initial={{ opacity: 0, y: 20 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            transition={{ duration: 0.6, delay: 0.3 }}
-          >
-            <motion.button
-              onClick={() => setIsAuthOpen(true)}
-              className="px-8 py-4 bg-orange-500 text-white font-bold rounded-lg hover:bg-orange-600 transform hover:scale-105 transition-all duration-300"
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-            >
-              Browse All Vendors →
-            </motion.button>
-          </motion.div>
-        </motion.div>
+        </div>
       </section>
 
       <HowItWorks />
 
-      <section className="py-20 px-4 bg-white">
-        <div className="max-w-5xl mx-auto">
-          <div className="mb-8 text-center">
-            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-orange-500">
-              Live order tracking
-            </p>
-            <h3 className="mt-3 text-3xl md:text-4xl font-bold text-gray-900">
-              Track every order from checkout to delivery
-            </h3>
+      {liveOrderId && (
+        <section className="bg-white pb-4 pt-2">
+          <div className="sabiget-shell max-w-3xl">
+            <div className="mb-6 flex items-end justify-between gap-4">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#ff4500]">
+                  Live order
+                </p>
+                <h3 className="mt-1 text-2xl font-extrabold tracking-tight text-[#111111]">
+                  Your order is being tracked
+                </h3>
+              </div>
+              <Link
+                href="/orders"
+                className="inline-flex shrink-0 items-center gap-1.5 text-sm font-bold text-[#e63d00] hover:underline"
+              >
+                All orders
+                <ArrowRight className="h-4 w-4" aria-hidden="true" />
+              </Link>
+            </div>
+            <OrderStatusCard orderId={liveOrderId} />
           </div>
+        </section>
+      )}
 
-          <div className="grid gap-6 md:grid-cols-2">
-            {liveOrderId ? (
-              <OrderStatusCard orderId={liveOrderId} />
-            ) : (
-              <>
-                <OrderStatusCard
-                  orderId="demo-order-1001"
-                  vendorName="Buka & Flame"
-                  totalAmount={11800}
-                  reference="SG-ORD-1001"
-                />
-                <OrderStatusCard
-                  orderId="demo-order-1002"
-                  vendorName="Pepper Pot Express"
-                  totalAmount={8700}
-                  reference="SG-ORD-1002"
-                />
-              </>
-            )}
-          </div>
-        </div>
-      </section>
+      <TrustSection />
 
-      <section className="py-20 px-4 bg-linear-to-r from-orange-500 to-amber-600 relative overflow-hidden">
-        <div className="max-w-4xl mx-auto text-center relative z-10">
-          <h2 className="text-4xl md:text-5xl font-bold text-white mb-4">
-            Ready to enjoy your next meal?
-          </h2>
-          <p className="text-xl text-white/90 mb-8">
-            Sign in with just your phone number. No password needed. Browse
-            vendors, order securely, and verify every delivery.
-          </p>
-          <motion.div
-            className="flex flex-col sm:flex-row gap-4 justify-center"
-            initial={{ opacity: 0, y: 20 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            transition={{ duration: 0.6, delay: 0.2 }}
-          >
-            <motion.button
-              onClick={() => setIsAuthOpen(true)}
-              className="px-8 py-4 bg-white text-orange-600 font-bold rounded-lg hover:bg-gray-100 transform hover:scale-105 transition-all duration-300 text-lg"
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-            >
-              🚀 Get Started
-            </motion.button>
-            <motion.button
-              className="px-8 py-4 bg-white/20 text-white font-bold border-2 border-white rounded-lg hover:bg-white/30 transform hover:scale-105 transition-all duration-300 text-lg backdrop-blur-sm"
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-            >
-              Learn More
-            </motion.button>
-          </motion.div>
-        </div>
-      </section>
+      <VendorCTA />
+
+      <FinalCTA onFindFood={handleFindFood} />
 
       <Footer />
+
       <AuthModal isOpen={isAuthOpen} onClose={() => setIsAuthOpen(false)} />
       <MenuModal
         isOpen={Boolean(selectedVendor)}
@@ -279,6 +545,6 @@ export default function HomePage() {
         vendorName={selectedVendor?.name || "Vendor"}
         onClose={() => setSelectedVendor(null)}
       />
-    </>
+    </MotionConfig>
   );
 }

@@ -4,6 +4,7 @@
 
 import express from "express";
 import { verifyWebhookSignature } from "../utils/paystack.js";
+import { emitOrderStatusUpdate } from "../services/socketService.js";
 
 const router = express.Router();
 
@@ -217,6 +218,8 @@ async function handleChargeSuccess(data) {
   global.io
     ?.to(`vendor:${updatedOrder.vendorId}`)
     .emit("order:new", buildVendorNotification(updatedOrder));
+
+  emitOrderStatusUpdate(updatedOrder);
 }
 
 async function handleChargeFailed(data) {

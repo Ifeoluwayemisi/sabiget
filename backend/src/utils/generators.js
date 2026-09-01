@@ -7,10 +7,9 @@ import crypto from "node:crypto";
  * @returns {string} OTP code
  */
 export function generateOTP(length = 6) {
-  const digits = "0123456789";
   let otp = "";
   for (let i = 0; i < length; i++) {
-    otp += digits.charAt(Math.floor(Math.random() * digits.length));
+    otp += String(crypto.randomInt(0, 10));
   }
   return otp;
 }
@@ -24,7 +23,7 @@ export function generateDVC() {
   const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
   let dvc = "";
   for (let i = 0; i < 6; i++) {
-    dvc += chars.charAt(Math.floor(Math.random() * chars.length));
+    dvc += chars.charAt(crypto.randomInt(0, chars.length));
   }
   return dvc;
 }

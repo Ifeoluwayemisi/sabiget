@@ -24,7 +24,6 @@ const sendOTPService = async (phone) => {
       },
     });
 
-    console.log(`[OTP] Generated for ${phone}: ${otpCode}`);
     console.log(`[OTP] Attempting WhatsApp delivery to ${phone}`);
     const whatsappResult = await sendWhatsAppOTP({
       phone,

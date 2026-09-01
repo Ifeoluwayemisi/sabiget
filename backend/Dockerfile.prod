@@ -1,0 +1,19 @@
+FROM node:18-alpine AS builder
+WORKDIR /app
+COPY package*.json ./
+# Install all dependencies (including dev deps) for build and Prisma
+RUN npm ci
+COPY . .
+# Generate Prisma client (requires deps)
+RUN npx prisma generate
+
+FROM node:18-alpine AS runner
+WORKDIR /app
+ENV NODE_ENV=production
+# Create non-root user
+RUN addgroup -S sabiget && adduser -S sabiget -G sabiget
+COPY --from=builder /app .
+RUN chown -R sabiget:sabiget /app
+USER sabiget
+EXPOSE 5000
+CMD ["node", "src/app.js"]

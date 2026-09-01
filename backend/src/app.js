@@ -21,6 +21,7 @@ import customerRoutes from "./routes/customerRoutes.js";
 import adminRoutes from "./routes/adminRoutes.js";
 import webhookRoutes from "./routes/webhookRoutes.js";
 import { autoKillExpiredPendingOrders } from "./services/orderService.js";
+import { registerSocketHandlers } from "./services/socketService.js";
 
 const prisma = new PrismaClient();
 const app = express();
@@ -74,65 +75,7 @@ app.use("/api/v1/customers", customerRoutes);
 app.use("/api/v1/admin", adminRoutes);
 app.use("/api/v1/webhooks", webhookRoutes);
 
-const vendorConnections = new Map();
-
-io.on("connection", (socket) => {
-  console.log(`[Socket.io] Client connected: ${socket.id}`);
-
-  socket.on("vendor:join", (vendorId) => {
-    socket.join(`vendor:${vendorId}`);
-    vendorConnections.set(vendorId, socket.id);
-    console.log(`[Socket.io] Vendor ${vendorId} joined room`);
-    socket.emit("connection:success", {
-      message: "Connected to vendor notifications channel",
-      vendorId,
-    });
-  });
-
-  socket.on("order:accept", (data) => {
-    const { vendorId, orderId } = data;
-    console.log(`[Socket.io] Order ${orderId} accepted by vendor ${vendorId}`);
-    socket.emit("order:accepted", { orderId, status: "ACCEPTED" });
-  });
-
-  socket.on("order:statusUpdate", (data) => {
-    const { vendorId, orderId, status } = data;
-    console.log(`[Socket.io] Order ${orderId} status updated to ${status}`);
-    io.to(`vendor:${vendorId}`).emit("order:statusUpdated", {
-      orderId,
-      status,
-    });
-  });
-
-  socket.on("order:dvcEntered", (data) => {
-    const { orderId } = data;
-    console.log(`[Socket.io] DVC entered for order ${orderId}`);
-    socket.emit("order:dvcReceived", { orderId, success: true });
-  });
-
-  socket.on("customer:join", (userId) => {
-    socket.join(`customer:${userId}`);
-    console.log(`[Socket.io] Customer ${userId} joined order tracking room`);
-    socket.emit("connection:success", {
-      message: "Connected to order tracking channel",
-      userId,
-    });
-  });
-
-  socket.on("disconnect", () => {
-    console.log(`[Socket.io] Client disconnected: ${socket.id}`);
-    for (const [vendorId, socketId] of vendorConnections.entries()) {
-      if (socketId === socket.id) {
-        vendorConnections.delete(vendorId);
-        console.log(`[Socket.io] Vendor ${vendorId} disconnected`);
-      }
-    }
-  });
-
-  socket.on("error", (error) => {
-    console.error(`[Socket.io] Error: ${error}`);
-  });
-});
+const vendorConnections = registerSocketHandlers(io);
 
 global.vendorConnections = vendorConnections;
 
@@ -164,7 +107,9 @@ async function startServer() {
 
   return new Promise((resolve) => {
     server.listen(PORT, () => {
-      console.log(`SabiGet backend running on http://localhost:${PORT} (${NODE_ENV})`);
+      console.log(
+        `SabiGet backend running on http://localhost:${PORT} (${NODE_ENV})`,
+      );
       resolve(server);
     });
   });
@@ -180,7 +125,10 @@ process.on("SIGTERM", async () => {
   process.exit(0);
 });
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(process.argv[1]).href
+) {
   await startServer();
 }
 

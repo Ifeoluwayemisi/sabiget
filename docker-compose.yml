@@ -1,20 +1,27 @@
-version: "3.8"
 services:
   db:
     image: postgres:15
     environment:
       - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=@Olorunmi81
+      - POSTGRES_PASSWORD=postgres
       - POSTGRES_DB=sabiget
     volumes:
       - db-data:/var/lib/postgresql/data
     ports:
-      - "5432:5432"
+      - "15432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d sabiget"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
 
   redis:
     image: redis:7
-    ports:
-      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
 
   backend:
     build:
@@ -22,25 +29,31 @@ services:
     ports:
       - "5000:5000"
     depends_on:
-      - db
-      - redis
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     environment:
-      - NODE_ENV=production
       - PORT=5000
-      - DATABASE_URL=postgresql://postgres:%40Olorunmi81@localhost:5432/sabiget?schema=public
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/sabiget?schema=public
       - REDIS_URL=redis://redis:6379
       - FRONTEND_URL=http://localhost:3000
+      # Development-only secrets. Production must inject real values.
+      - JWT_ACCESS_SECRET=dev-only-access-secret-change-me
+      - JWT_REFRESH_SECRET=dev-only-refresh-secret-change-me
 
   frontend:
     build:
       context: ./frontend
+      args:
+        # Baked into the client bundle at build time. The browser resolves
+        # localhost, not the Docker-internal "backend" hostname.
+        NEXT_PUBLIC_API_BASE_URL: http://localhost:5000/api/v1
     ports:
       - "3000:3000"
     depends_on:
-      - backend
-    environment:
-      - NODE_ENV=production
-      - NEXT_PUBLIC_API_BASE_URL=http://backend:5000
+      backend:
+        condition: service_started
     env_file:
       - frontend/.env
 

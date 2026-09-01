@@ -1,5 +1,8 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, jest } from "@jest/globals";
 
+process.env.JWT_ACCESS_SECRET ||= "test-access-secret";
+process.env.JWT_REFRESH_SECRET ||= "test-refresh-secret";
+
 let mockCurrentUser;
 
 const initializePayment = jest.fn();
@@ -61,6 +64,7 @@ describe("product, order, and webhook endpoint verification", () => {
       },
       User: {
         findUnique: jest.fn(),
+        create: jest.fn(),
       },
       Order: {
         findUnique: jest.fn(),
@@ -173,6 +177,135 @@ describe("product, order, and webhook endpoint verification", () => {
 
     expect(createResponse.status).toBe(201);
     expect(listResponse.status).toBe(200);
+  });
+
+  it("creates a guest checkout order and returns Paystack authorization data", async () => {
+    prisma.User.findUnique.mockResolvedValue(null);
+    prisma.User.create.mockResolvedValue({ id: "guest_1", email: null });
+    prisma.Vendor.findUnique.mockResolvedValue({
+      id: "vendor_1",
+      paystackSubcode: "SUB_1",
+    });
+    prisma.Product.findUnique.mockResolvedValue({
+      id: "p1",
+      vendorId: "vendor_1",
+      isAvailable: true,
+      price: 2000,
+    });
+    prisma.Order.create.mockResolvedValue({ id: "order_guest" });
+    prisma.Order.update.mockResolvedValue({ id: "order_guest" });
+    initializePayment.mockResolvedValue({
+      success: true,
+      data: { authorization_url: "https://pay", access_code: "acc_guest" },
+    });
+
+    const response = await orderServer.request("/guest-checkout", {
+      method: "POST",
+      body: JSON.stringify({
+        phone: "+2348123456789",
+        vendorId: "vendor_1",
+        items: [{ productId: "p1", quantity: 2 }],
+        deliveryAddress: "1 Guest Road",
+        deliveryLat: 6.5,
+        deliveryLng: 3.3,
+      }),
+    });
+
+    expect(response.status).toBe(201);
+    expect(response.body.success).toBe(true);
+    expect(response.body.authorizationUrl).toBe("https://pay");
+    expect(response.body.paystackAccessCode).toBe("acc_guest");
+    expect(typeof response.body.guestOrderToken).toBe("string");
+    expect(prisma.Order.update).toHaveBeenCalledWith({
+      where: { id: "order_guest" },
+      data: { paystackAccessCode: "acc_guest" },
+    });
+  });
+
+  it("lets a guest track their own paid order with the limited-scope token", async () => {
+    prisma.Order.findUnique.mockResolvedValue({
+      id: "order_guest",
+      userId: "guest_1",
+      vendorId: "vendor_1",
+      status: "PENDING",
+      totalAmount: 4500,
+      paymentReference: "SG-ORD-1",
+      items: [],
+      vendor: { id: "vendor_1", name: "Test Kitchen", phone: "+234", email: null },
+      user: { id: "guest_1", name: null, phone: "+2348123456789", email: null },
+    });
+
+    const { generateGuestOrderToken } = await import("../utils/jwt.js");
+    const token = generateGuestOrderToken("order_guest");
+
+    const response = await orderServer.request("/order_guest/guest-status", {
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.body.success).toBe(true);
+    expect(response.body.order.id).toBe("order_guest");
+  });
+
+  it("rejects guest tracking without a token, with a foreign token, or with a session token", async () => {
+    const { generateGuestOrderToken, generateAccessToken } = await import(
+      "../utils/jwt.js"
+    );
+
+    // A token minted for another order must be refused before any DB lookup.
+    const foreignToken = generateGuestOrderToken("order_other");
+    const mismatched = await orderServer.request("/order_guest/guest-status", {
+      headers: { authorization: `Bearer ${foreignToken}` },
+    });
+    expect(mismatched.status).toBe(403);
+    expect(prisma.Order.findUnique).not.toHaveBeenCalled();
+
+    // Regular access tokens carry no order scope and must not unlock tracking.
+    const memberToken = generateAccessToken("user_1", "MEMBER");
+    const sessionTokenAttempt = await orderServer.request(
+      "/order_guest/guest-status",
+      { headers: { authorization: `Bearer ${memberToken}` } },
+    );
+    expect(sessionTokenAttempt.status).toBe(403);
+
+    const unauthenticated = await orderServer.request(
+      "/order_guest/guest-status",
+    );
+    expect(unauthenticated.status).toBe(401);
+  });
+
+  it("returns 500 and does not persist an access code when guest payment initialization fails", async () => {
+    prisma.User.findUnique.mockResolvedValue(null);
+    prisma.User.create.mockResolvedValue({ id: "guest_2", email: null });
+    prisma.Vendor.findUnique.mockResolvedValue({
+      id: "vendor_1",
+      paystackSubcode: "SUB_1",
+    });
+    prisma.Product.findUnique.mockResolvedValue({
+      id: "p1",
+      vendorId: "vendor_1",
+      isAvailable: true,
+      price: 2000,
+    });
+    prisma.Order.create.mockResolvedValue({ id: "order_guest_fail" });
+    initializePayment.mockResolvedValue({
+      success: false,
+      error: "Paystack unreachable",
+    });
+
+    const response = await orderServer.request("/guest-checkout", {
+      method: "POST",
+      body: JSON.stringify({
+        phone: "+2348123456789",
+        vendorId: "vendor_1",
+        items: [{ productId: "p1", quantity: 1 }],
+        deliveryAddress: "1 Guest Road",
+      }),
+    });
+
+    expect(response.status).toBe(500);
+    expect(response.body.error).toBe("Payment initialization failed");
+    expect(prisma.Order.update).not.toHaveBeenCalled();
   });
 
   it("verifies webhook processing paths", async () => {
