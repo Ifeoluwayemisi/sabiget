@@ -47,9 +47,12 @@ await jest.unstable_mockModule("../services/customerService.js", () => ({
 }));
 
 const { startTestServer } = await import("./startTestServer.js");
-const { triggerOrderRefund, completeDeliveredOrder } = await import(
-  "../services/orderService.js"
-);
+const {
+  triggerOrderRefund,
+  completeDeliveredOrder,
+  retryFailedRefunds,
+} = await import("../services/orderService.js");
+const { hashCode } = await import("../utils/generators.js");
 const orderRouter = (await import("../routes/orderRoutes.js")).default;
 
 function buildPrisma() {
@@ -179,9 +182,249 @@ describe("guarded order transitions", () => {
     const first = await completeDeliveredOrder("ord_5");
     const second = await completeDeliveredOrder("ord_5");
 
-    expect(first.success).toBe(true);
+expect(first.success).toBe(true);
     expect(second.success).toBe(true);
     expect(second.alreadyCompleted).toBe(true);
     expect(prisma.Order.update).not.toHaveBeenCalled();
+  });
+
+  it("stores only a hashed DVC when accepting an order", async () => {
+    prisma.Order.findUnique.mockResolvedValue({
+      id: "ord_6",
+      vendorId: "vendor_1",
+      status: "PENDING",
+      acceptanceDeadline: futureDeadline,
+    });
+    prisma.Order.updateMany.mockResolvedValueOnce({ count: 1 });
+
+    const server = servers.at(-1);
+    const response = await server.request("/ord_6/accept", { method: "POST" });
+
+    expect(response.status).toBe(200);
+    expect(response.body.status).toBe("ACCEPTED");
+    expect(prisma.Order.updateMany).toHaveBeenCalledTimes(1);
+    // sha256 hex digest length 64; plaintext DVC never hits the database.
+    expect(prisma.Order.updateMany.mock.calls[0][0].data.dvcCode).toMatch(
+      /^[0-9a-f]{64}$/,
+    );
+  });
+
+  it("marks an accepted order as preparing atomically", async () => {
+    prisma.Order.findUnique.mockResolvedValue({
+      id: "ord_7",
+      vendorId: "vendor_1",
+      status: "ACCEPTED",
+    });
+    prisma.Order.updateMany.mockResolvedValueOnce({ count: 1 });
+
+    const server = servers.at(-1);
+    const response = await server.request("/ord_7/preparing", {
+      method: "POST",
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.body.status).toBe("PREPARING");
+    expect(prisma.Order.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ status: "ACCEPTED" }),
+        data: expect.objectContaining({ status: "PREPARING" }),
+      }),
+    );
+  });
+
+  it("rejects preparing a non-accepted order", async () => {
+    prisma.Order.findUnique.mockResolvedValue({
+      id: "ord_8",
+      vendorId: "vendor_1",
+      status: "PENDING",
+    });
+
+    const server = servers.at(-1);
+    const response = await server.request("/ord_8/preparing", {
+      method: "POST",
+    });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error).toContain("PENDING");
+    expect(prisma.Order.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("marks an accepted order out for delivery", async () => {
+    prisma.Order.findUnique.mockResolvedValue({
+      id: "ord_9",
+      vendorId: "vendor_1",
+      status: "ACCEPTED",
+    });
+    prisma.Order.updateMany.mockResolvedValueOnce({ count: 1 });
+
+    const server = servers.at(-1);
+    const response = await server.request("/ord_9/out-for-delivery", {
+      method: "POST",
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.body.status).toBe("OUT_FOR_DELIVERY");
+  });
+
+  it("marks a preparing order out for delivery", async () => {
+    prisma.Order.findUnique.mockResolvedValue({
+      id: "ord_10",
+      vendorId: "vendor_1",
+      status: "PREPARING",
+    });
+    prisma.Order.updateMany.mockResolvedValueOnce({ count: 1 });
+
+    const server = servers.at(-1);
+    const response = await server.request("/ord_10/out-for-delivery", {
+      method: "POST",
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.body.status).toBe("OUT_FOR_DELIVERY");
+    expect(prisma.Order.updateMany.mock.calls[0][0].where.status.in).toEqual([
+      "ACCEPTED",
+      "PREPARING",
+    ]);
+  });
+
+  it("verifies a DVC against its stored hash", async () => {
+    prisma.Order.findUnique.mockResolvedValue({
+      id: "ord_11",
+      vendorId: "vendor_1",
+      status: "OUT_FOR_DELIVERY",
+      dvcCode: hashCode("ABCD12"),
+      dvcLockedUntil: null,
+    });
+    prisma.Order.updateMany.mockResolvedValueOnce({ count: 1 });
+
+    const server = servers.at(-1);
+    const response = await server.request("/ord_11/verify-dvc", {
+      method: "POST",
+      body: JSON.stringify({ dvcCode: "abcd12" }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.body.status).toBe("DELIVERED");
+    // Case-insensitive: the route uppercases before hashing and comparing.
+    expect(prisma.Order.update).not.toHaveBeenCalled();
+  });
+
+  it("rejects a wrong DVC and counts the failed attempt", async () => {
+    prisma.Order.findUnique
+      .mockResolvedValueOnce({
+        id: "ord_12",
+        vendorId: "vendor_1",
+        status: "OUT_FOR_DELIVERY",
+        dvcCode: hashCode("ABCD12"),
+        dvcLockedUntil: null,
+      })
+      .mockResolvedValueOnce({ dvcAttempts: 1, dvcLockedUntil: null });
+    prisma.Order.update.mockResolvedValue({});
+
+    const server = servers.at(-1);
+    const response = await server.request("/ord_12/verify-dvc", {
+      method: "POST",
+      body: JSON.stringify({ dvcCode: "ZZZZ99" }),
+    });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error).toBe("Invalid DVC code");
+    expect(prisma.Order.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: { dvcAttempts: { increment: 1 } },
+      }),
+    );
+  });
+
+  it("locks DVC verification after the configured max attempts", async () => {
+    prisma.Order.findUnique
+      .mockResolvedValueOnce({
+        id: "ord_13",
+        vendorId: "vendor_1",
+        status: "OUT_FOR_DELIVERY",
+        dvcCode: hashCode("ABCD12"),
+        dvcLockedUntil: null,
+      })
+      .mockResolvedValueOnce({ dvcAttempts: 3, dvcLockedUntil: null });
+    prisma.Order.update.mockResolvedValue({});
+    prisma.Order.updateMany.mockResolvedValue({ count: 1 });
+
+    const server = servers.at(-1);
+    const response = await server.request("/ord_13/verify-dvc", {
+      method: "POST",
+      body: JSON.stringify({ dvcCode: "ZZZZ99" }),
+    });
+
+    expect(response.status).toBe(400);
+    const lockoutCall = prisma.Order.updateMany.mock.calls.find(
+      (call) => call[0].data && call[0].data.dvcLockedUntil,
+    );
+    expect(lockoutCall).toBeDefined();
+    const lockoutMillis = lockoutCall[0].data.dvcLockedUntil - Date.now();
+    expect(lockoutMillis).toBeGreaterThan(14 * 60 * 1000);
+    expect(lockoutMillis).toBeLessThan(16 * 60 * 1000);
+  });
+
+  it("rejects further DVC attempts while locked", async () => {
+    prisma.Order.findUnique.mockResolvedValue({
+      id: "ord_13",
+      vendorId: "vendor_1",
+      status: "OUT_FOR_DELIVERY",
+      dvcCode: hashCode("ABCD12"),
+      dvcLockedUntil: new Date(Date.now() + 60 * 60 * 1000),
+    });
+
+    const server = servers.at(-1);
+    const response = await server.request("/ord_13/verify-dvc", {
+      method: "POST",
+      body: JSON.stringify({ dvcCode: "ABCD12" }),
+    });
+
+    expect(response.status).toBe(403);
+    expect(response.body.error).toContain("locked");
+  });
+
+  it("retries stranded refunds without touching cashed-out or customercancelled orders", async () => {
+    prisma.Order.findMany.mockResolvedValue([
+      {
+        id: "ord_14",
+        status: "CANCELLED_VENDOR",
+        paymentReference: "ref_14",
+        totalAmount: 4000,
+        refundInitiatedAt: null,
+        refundCompletedAt: null,
+      },
+      {
+        id: "ord_15",
+        status: "CANCELLED_AUTO_KILL",
+        paymentReference: "ref_15",
+        totalAmount: 9000,
+        refundInitiatedAt: null,
+        refundCompletedAt: null,
+      },
+    ]);
+    prisma.Order.updateMany.mockResolvedValue({ count: 1 });
+    prisma.Order.update.mockResolvedValue({});
+    initiateRefund.mockResolvedValue({ success: true });
+
+    const processed = await retryFailedRefunds();
+
+    expect(processed).toBe(2);
+    expect(prisma.Order.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          status: {
+            in: ["CANCELLED_VENDOR", "CANCELLED_AUTO_KILL", "CANCELLED_ADMIN"],
+          },
+        }),
+        orderBy: { cancelledAt: "asc" },
+      }),
+    );
+    expect(initiateRefund).toHaveBeenCalledTimes(2);
+    expect(prisma.Order.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: "REFUNDED" }),
+      }),
+    );
   });
 });

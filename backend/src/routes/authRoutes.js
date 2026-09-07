@@ -10,8 +10,8 @@ const router = express.Router();
 
 /**
  * POST /api/v1/auth/send-otp
- * Send OTP to user's phone (WhatsApp or SMS)
- * Body: { phone: "+2348123456789" }
+ * Send OTP to a customer (WhatsApp first; email fallback)
+ * Body: { phone: "+2348123456789", email?: "user@example.com" }
  */
 router.post("/send-otp", otpLimiter, authController.sendOTP);
 

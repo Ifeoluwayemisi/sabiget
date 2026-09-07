@@ -20,7 +20,7 @@ import orderRoutes from "./routes/orderRoutes.js";
 import customerRoutes from "./routes/customerRoutes.js";
 import adminRoutes from "./routes/adminRoutes.js";
 import webhookRoutes from "./routes/webhookRoutes.js";
-import { autoKillExpiredPendingOrders } from "./services/orderService.js";
+import { autoKillExpiredPendingOrders, retryFailedRefunds } from "./services/orderService.js";
 import { registerSocketHandlers } from "./services/socketService.js";
 
 const prisma = new PrismaClient();
@@ -92,12 +92,24 @@ const autoKillInterval = setInterval(async () => {
   }
 }, AUTO_KILL_INTERVAL_MS);
 
+const refundRetryInterval = setInterval(async () => {
+  try {
+    const processed = await retryFailedRefunds();
+    if (processed > 0) {
+      console.log(`[Refunds] Retried refunds for ${processed} order(s)`);
+    }
+  } catch (error) {
+    console.error("[Refunds] Retry worker error:", error.message);
+  }
+}, AUTO_KILL_INTERVAL_MS);
+
 app.use(notFoundHandler);
 app.use(errorHandler);
 
 async function shutdown() {
   console.log("\n[Shutdown] Closing connections...");
   clearInterval(autoKillInterval);
+  clearInterval(refundRetryInterval);
   await prisma.$disconnect();
 }
 

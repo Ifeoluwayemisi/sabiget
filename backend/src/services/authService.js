@@ -4,61 +4,59 @@
 
 import { generateOTP, hashCode, verifyCode } from "../utils/generators.js";
 import { generateTokenPair } from "../utils/jwt.js";
-import { sendWhatsAppOTP, sendSmsOTP } from "../utils/termii.js";
+import { sendOtpNotification } from "../utils/notifications.js";
+import config from "../config.js";
 
 const getPrisma = () => global.prisma;
 
-const sendOTPService = async (phone) => {
+const sendOTPService = async (phone, email = null) => {
   try {
-    const otpCode = generateOTP(6);
+    const otpCode = generateOTP(config.otp.length);
     const hashedOTP = hashCode(otpCode);
 
     const otpLog = await getPrisma().OTPLog.create({
       data: {
         phone,
         code: hashedOTP,
-        expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+        expiresAt: new Date(
+          Date.now() + config.otp.expiryMinutes * 60 * 1000,
+        ),
         maxAttempts: 3,
         attempts: 0,
         isUsed: false,
       },
     });
 
-    console.log(`[OTP] Attempting WhatsApp delivery to ${phone}`);
-    const whatsappResult = await sendWhatsAppOTP({
+    // WhatsApp first, then email fallback (no SMS). Outside production an
+    // explicit console channel prints the code so QA can complete the flow.
+    const delivery = await sendOtpNotification({
       phone,
+      email,
       code: otpCode,
+      expiryMinutes: config.otp.expiryMinutes,
+      otpId: otpLog.id,
     });
 
-    if (whatsappResult.success) {
-      console.log(`[OTP] WhatsApp sent successfully to ${phone}`);
+    if (!delivery.delivered && delivery.mode === "unavailable") {
       return {
-        success: true,
-        message: "OTP sent via WhatsApp",
-        channel: "WHATSAPP",
+        success: false,
+        error: delivery.error,
         otpId: otpLog.id,
       };
     }
 
-    console.log(`[OTP] WhatsApp failed, scheduling SMS fallback for ${phone}`);
-    setTimeout(async () => {
-      console.log(`[OTP] Attempting SMS delivery to ${phone}`);
-      const smsResult = await sendSmsOTP({
-        phone,
-        code: otpCode,
-      });
-
-      if (smsResult.success) {
-        console.log(`[OTP] SMS sent successfully to ${phone}`);
-      } else {
-        console.error(`[OTP] SMS also failed for ${phone}`);
-      }
-    }, 30000);
+    const channel = delivery.channel || "CONSOLE";
 
     return {
       success: true,
-      message: "OTP sent via WhatsApp, SMS fallback scheduled",
-      channel: "WHATSAPP",
+      message:
+        channel === "WHATSAPP"
+          ? "OTP sent via WhatsApp"
+          : channel === "EMAIL"
+            ? "OTP sent to your email"
+            : "OTP generated in development mode (see server console)",
+      channel,
+      mode: delivery.mode,
       otpId: otpLog.id,
     };
   } catch (error) {

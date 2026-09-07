@@ -18,6 +18,17 @@ await jest.unstable_mockModule("../middleware/auth.js", () => ({
     req.user = mockCurrentUser;
     next();
   },
+  authorize: (...allowedRoles) => (req, res, next) => {
+    if (!req.user) {
+      return res.status(401).json({ error: "Not authenticated" });
+    }
+    if (!allowedRoles.includes(req.user.role)) {
+      return res.status(403).json({
+        error: `Access denied. Required roles: ${allowedRoles.join(", ")}`,
+      });
+    }
+    next();
+  },
 }));
 
 await jest.unstable_mockModule("../services/memberAuthService.js", () => ({
@@ -244,5 +255,177 @@ describe("customer endpoint verification", () => {
 
     expect(insightsResponse.status).toBe(200);
     expect(recommendationsResponse.status).toBe(200);
+  });
+});
+
+describe("customer-only routes RBAC", () => {
+  let server;
+  let prisma;
+
+  const protectedRequests = [
+    ["GET", "/orders/order_1"],
+    ["GET", "/loyalty-points"],
+    ["GET", "/order-history"],
+    ["POST", "/orders/order_1/review", { rating: 5 }],
+    ["GET", "/orders/order_1/review"],
+    ["POST", "/loyalty-points/redeem", { pointsToRedeem: 100 }],
+    ["GET", "/insights"],
+    ["GET", "/recommendations?latitude=6.5&longitude=3.3&radius=5"],
+    ["POST", "/create-account", { email: "a@b.com" }],
+  ];
+
+  async function call(route, options = {}) {
+    const [method, path, body] = route;
+    return server.request(path, {
+      method,
+      ...(body ? { body: JSON.stringify(body) } : {}),
+      ...options,
+    });
+  }
+
+  beforeEach(async () => {
+    prisma = {
+      Vendor: {
+        findMany: jest.fn(),
+        findUnique: jest.fn(),
+        update: jest.fn(),
+      },
+      Order: {
+        findMany: jest.fn(),
+        findUnique: jest.fn(),
+        count: jest.fn(),
+      },
+      User: {
+        findUnique: jest.fn(),
+      },
+      Review: {
+        findFirst: jest.fn(),
+        create: jest.fn(),
+        findMany: jest.fn(),
+        count: jest.fn(),
+      },
+    };
+    global.prisma = prisma;
+    jest.clearAllMocks();
+    mockCurrentUser = { userId: "user_1", role: "MEMBER" };
+    server = await startTestServer(customerRouter);
+  });
+
+  afterEach(async () => {
+    await server.close();
+  });
+
+  afterAll(() => {
+    delete global.prisma;
+  });
+
+  for (const [method, path, body] of protectedRequests) {
+    it(`blocks VENDOR from customer-only ${method} ${path} with 403`, async () => {
+      mockCurrentUser = { userId: "user_1", role: "VENDOR" };
+      const response = await call([method, path, body]);
+      expect(response.status).toBe(403);
+    });
+  }
+
+  for (const [method, path, body] of protectedRequests) {
+    it(`blocks ADMIN from customer-only ${method} ${path} with 403`, async () => {
+      mockCurrentUser = { userId: "user_1", role: "ADMIN" };
+      const response = await call([method, path, body]);
+      expect(response.status).toBe(403);
+    });
+  }
+
+  for (const [method, path, body] of protectedRequests) {
+    it(`blocks SUPER_ADMIN from customer-only ${method} ${path} with 403`, async () => {
+      mockCurrentUser = { userId: "user_1", role: "SUPER_ADMIN" };
+      const response = await call([method, path, body]);
+      expect(response.status).toBe(403);
+    });
+  }
+
+  for (const [method, path, body] of protectedRequests) {
+    it(`returns 401 for unauthenticated request to customer-only ${method} ${path}`, async () => {
+      mockCurrentUser = null;
+      const response = await call([method, path, body]);
+      expect(response.status).toBe(401);
+    });
+  }
+
+  it("allows GUEST on customer-only routes where appropriate", async () => {
+    mockCurrentUser = { userId: "user_1", role: "GUEST" };
+    prisma.User.findUnique.mockResolvedValue({
+      loyaltyPoints: 100,
+      pointsEarned: 100,
+      pointsRedeemed: 0,
+      orderCount: 1,
+      role: "GUEST",
+    });
+    prisma.Order.findMany.mockResolvedValue([]);
+    prisma.Order.count.mockResolvedValue(0);
+    getCustomerInsights.mockResolvedValue({
+      success: true,
+      insights: { totalOrders: 0, totalSpent: 0 },
+    });
+
+    const [loyalty, history, insights] = await Promise.all([
+      server.request("/loyalty-points", { method: "GET" }),
+      server.request("/order-history", { method: "GET" }),
+      server.request("/insights", { method: "GET" }),
+    ]);
+
+    expect(loyalty.status).toBe(200);
+    expect(history.status).toBe(200);
+    expect(insights.status).toBe(200);
+  });
+
+  it("allows MEMBER on customer-only routes", async () => {
+    mockCurrentUser = { userId: "user_1", role: "MEMBER" };
+    prisma.User.findUnique.mockResolvedValue({
+      loyaltyPoints: 200,
+      pointsEarned: 250,
+      pointsRedeemed: 50,
+      orderCount: 4,
+      role: "MEMBER",
+    });
+    prisma.Order.findMany.mockResolvedValue([]);
+    prisma.Order.count.mockResolvedValue(0);
+    getCustomerInsights.mockResolvedValue({
+      success: true,
+      insights: { totalOrders: 3, totalSpent: 12000 },
+    });
+
+    const [loyalty, history, insights] = await Promise.all([
+      server.request("/loyalty-points", { method: "GET" }),
+      server.request("/order-history", { method: "GET" }),
+      server.request("/insights", { method: "GET" }),
+    ]);
+
+    expect(loyalty.status).toBe(200);
+    expect(history.status).toBe(200);
+    expect(insights.status).toBe(200);
+  });
+
+  it("keeps public/non-customer routes reachable by any authenticated role", async () => {
+    prisma.Vendor.findMany.mockResolvedValue([]);
+    findNearbyVendors.mockReturnValue([]);
+    prisma.Vendor.findUnique.mockResolvedValue({
+      id: "vendor_1",
+      name: "Food Place",
+      isActive: true,
+      metrics: { avgPreparationTime: 15 },
+      products: [],
+    });
+
+    mockCurrentUser = { userId: "user_1", role: "VENDOR" };
+    const nearby = await server.request(
+      "/nearby-vendors?latitude=6.5&longitude=3.3&radius=5",
+      { method: "GET" },
+    );
+    expect(nearby.status).toBe(200);
+
+    const menu = await server.request("/vendors/vendor_1/menu", {
+      method: "GET",
+    });
+    expect(menu.status).toBe(200);
   });
 });

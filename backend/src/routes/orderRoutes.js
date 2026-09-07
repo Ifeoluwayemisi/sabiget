@@ -10,8 +10,10 @@ import {
   completeDeliveredOrder,
   triggerOrderRefund,
 } from "../services/orderService.js";
-import { generateDVC, generateIdempotencyKey } from "../utils/generators.js";
+import { generateDVC, generateIdempotencyKey, hashCode, verifyCode } from "../utils/generators.js";
 import { emitOrderStatusUpdate } from "../services/socketService.js";
+import { sendOrderNotification } from "../utils/notifications.js";
+import config from "../config.js";
 import {
   generateGuestOrderToken,
   verifyGuestOrderToken,
@@ -67,6 +69,8 @@ router.post("/guest-checkout", checkoutLimiter, async (req, res) => {
       });
     }
 
+    const idempotencyKey = getIdempotencyKey(req);
+
     // Find or create GUEST user with this phone
     let user = await global.prisma.User.findUnique({ where: { phone } });
 
@@ -82,6 +86,34 @@ router.post("/guest-checkout", checkoutLimiter, async (req, res) => {
       return res.status(403).json({
         success: false,
         error: "This phone is registered as a vendor account",
+      });
+    }
+
+    // Idempotency: a retried request carrying the same key (client retries
+    // after a lost response) returns the already-created order instead of
+    // charging the customer twice. The key is bound to the phone that owns
+    // the order, mirroring the authenticated member path.
+    const existingOrder = await global.prisma.Order.findUnique({
+      where: { idempotencyKey },
+    });
+
+    if (existingOrder) {
+      if (existingOrder.userId !== user.id) {
+        return res.status(409).json({
+          success: false,
+          error: "Idempotency key already used by another user",
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: "Existing order returned for idempotent request",
+        orderId: existingOrder.id,
+        reference: existingOrder.paymentReference,
+        paystackAccessCode: existingOrder.paystackAccessCode,
+        guestOrderToken: generateGuestOrderToken(existingOrder.id),
+        idempotencyKey: existingOrder.idempotencyKey,
+        status: existingOrder.status,
       });
     }
 
@@ -128,11 +160,10 @@ router.post("/guest-checkout", checkoutLimiter, async (req, res) => {
       });
     }
 
-    const serviceFee = 500;
+    const serviceFee = config.serviceFeeNaira;
     const platformFee = 0;
     const totalAmount = foodCost + serviceFee + platformFee;
     const paymentReference = `SG-ORD-${Date.now()}-${generateIdempotencyKey()}`;
-    const idempotencyKey = generateIdempotencyKey();
 
     const order = await global.prisma.Order.create({
       data: {
@@ -158,7 +189,7 @@ router.post("/guest-checkout", checkoutLimiter, async (req, res) => {
       email: user.email || `guest+${phone}@sabiget.com`,
       amount: totalAmount,
       reference: paymentReference,
-      callbackUrl: "https://sabiget.com/payment-callback",
+      callbackUrl: config.paystack.callbackUrl,
       subaccount: vendor.paystackSubcode,
       transaction_charge: serviceFee,
       metadata: {
@@ -349,7 +380,7 @@ router.post("/", checkoutLimiter, authenticateToken, async (req, res) => {
       });
     }
 
-    const serviceFee = 500;
+    const serviceFee = config.serviceFeeNaira;
     const platformFee = 0;
     const totalAmount = foodCost + serviceFee + platformFee;
     const paymentReference = `SG-ORD-${Date.now()}-${generateIdempotencyKey()}`;
@@ -378,7 +409,7 @@ router.post("/", checkoutLimiter, authenticateToken, async (req, res) => {
       email: user.email || "customer@sabiget.com",
       amount: totalAmount,
       reference: paymentReference,
-      callbackUrl: "https://sabiget.com/payment-callback",
+      callbackUrl: config.paystack.callbackUrl,
       subaccount: vendor.paystackSubcode,
       transaction_charge: serviceFee,
       metadata: {
@@ -546,7 +577,14 @@ router.post(
         });
       }
 
-      const order = await global.prisma.Order.findUnique({ where: { id } });
+      const order = await global.prisma.Order.findUnique({
+        where: { id },
+        include: {
+          user: {
+            select: { id: true, phone: true, email: true },
+          },
+        },
+      });
       if (!order) {
         return res
           .status(404)
@@ -578,7 +616,7 @@ router.post(
         });
       }
 
-      const dvcCode = generateDVC();
+      const dvcCode = generateDVC(config.dvc.length);
 
       // Guarded transition: a concurrent customer cancel, vendor reject, or
       // auto-kill wins and this update matches nothing.
@@ -588,7 +626,9 @@ router.post(
           status: "ACCEPTED",
           acceptedAt: new Date(),
           acceptanceDeadline: null,
-          dvcCode,
+          // Only the salted hash is stored; verification never compares
+          // plaintext. The raw code goes to the vendor once via notification.
+          dvcCode: hashCode(dvcCode),
         },
       });
 
@@ -615,11 +655,132 @@ router.post(
 
       emitOrderStatusUpdate({ ...currentOrder, status: "ACCEPTED" });
 
+      // Fire-and-forget: the vendor receives the DVC at acceptance (to pass
+      // to the rider) and the customer is told their order was accepted.
+      void sendOrderNotification({
+        type: "ACCEPTED",
+        orderId: id,
+        vendorName: vendor.name,
+        customer: currentOrder.user || null,
+      }).catch((error) =>
+        console.error(`[Notifications] accept notify failed for ${id}:`, error.message),
+      );
+      void sendOrderNotification({
+        type: "VENDOR_DVC",
+        orderId: id,
+        vendorName: vendor.name,
+        vendor,
+        dvc: dvcCode,
+      }).catch((error) =>
+        console.error(`[Notifications] DVC notify failed for ${id}:`, error.message),
+      );
+
       res.json({
         success: true,
         message: "Order accepted",
         orderId: id,
         status: "ACCEPTED",
+      });
+    } catch (error) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  },
+);
+
+/**
+ * POST /api/orders/:id/preparing
+ * Vendor marks an accepted order as being prepared.
+ * Only ACCEPTED -> PREPARING is allowed (backwards-compatible paths can
+ * still jump ACCEPTED -> OUT_FOR_DELIVERY without passing through here).
+ */
+router.post(
+  "/:id/preparing",
+  authenticateToken,
+  authorize("VENDOR"),
+  async (req, res) => {
+    try {
+      const { id } = req.params;
+      const vendorUserId = req.user.userId;
+
+      const vendor = await global.prisma.Vendor.findUnique({
+        where: { userId: vendorUserId },
+      });
+      const order = await global.prisma.Order.findUnique({
+        where: { id },
+        include: {
+          user: {
+            select: { id: true, phone: true, email: true },
+          },
+        },
+      });
+
+      if (!vendor || !order || order.vendorId !== vendor.id) {
+        return res
+          .status(403)
+          .json({ success: false, error: "Not authorized" });
+      }
+
+      if (order.status === "PREPARING") {
+        return res.json({
+          success: true,
+          message: "Order is already being prepared",
+          orderId: id,
+          status: "PREPARING",
+        });
+      }
+
+      if (order.status !== "ACCEPTED") {
+        return res.status(400).json({
+          success: false,
+          error: `Cannot mark as preparing from ${order.status}`,
+        });
+      }
+
+      const updated = await global.prisma.Order.updateMany({
+        where: { id, vendorId: vendor.id, status: "ACCEPTED" },
+        data: {
+          status: "PREPARING",
+          preparedAt: new Date(),
+        },
+      });
+
+      if (updated.count === 0) {
+        const latest = await global.prisma.Order.findUnique({
+          where: { id },
+          select: { status: true },
+        });
+
+        if (latest && latest.status === "PREPARING") {
+          return res.json({
+            success: true,
+            message: "Order is already being prepared",
+            orderId: id,
+            status: "PREPARING",
+          });
+        }
+
+        return res.status(400).json({
+          success: false,
+          error: `Cannot mark as preparing from ${latest ? latest.status : "unknown"}`,
+        });
+      }
+
+      emitOrderStatusUpdate({ ...order, status: "PREPARING" });
+
+      void sendOrderNotification({
+        type: "PREPARING",
+        orderId: id,
+        vendorName: vendor.name,
+        customer: order.user || null,
+      }).catch((error) =>
+        console.error(`[Notifications] preparing notify failed for ${id}:`, error.message),
+      );
+
+      res.json({
+        success: true,
+        message: "Order marked as preparing",
+        orderId: id,
+        status: "PREPARING",
       });
     } catch (error) {
       res.status(500).json({ success: false, error: error.message });
@@ -756,7 +917,14 @@ router.post(
       const vendor = await global.prisma.Vendor.findUnique({
         where: { userId: vendorUserId },
       });
-      const order = await global.prisma.Order.findUnique({ where: { id } });
+      const order = await global.prisma.Order.findUnique({
+        where: { id },
+        include: {
+          user: {
+            select: { id: true, phone: true, email: true },
+          },
+        },
+      });
 
       if (!vendor || !order || order.vendorId !== vendor.id) {
         return res
@@ -773,7 +941,7 @@ router.post(
         });
       }
 
-      if (order.status !== "ACCEPTED") {
+      if (order.status !== "ACCEPTED" && order.status !== "PREPARING") {
         return res.status(400).json({
           success: false,
           error: `Cannot mark as out for delivery from ${order.status}`,
@@ -781,7 +949,7 @@ router.post(
       }
 
       const updated = await global.prisma.Order.updateMany({
-        where: { id, vendorId: vendor.id, status: "ACCEPTED" },
+        where: { id, vendorId: vendor.id, status: { in: ["ACCEPTED", "PREPARING"] } },
         data: {
           status: "OUT_FOR_DELIVERY",
           preparedAt: new Date(),
@@ -810,6 +978,15 @@ router.post(
       }
 
       emitOrderStatusUpdate({ ...order, status: "OUT_FOR_DELIVERY" });
+
+      void sendOrderNotification({
+        type: "OUT_FOR_DELIVERY",
+        orderId: id,
+        vendorName: vendor.name,
+        customer: order.user || null,
+      }).catch((error) =>
+        console.error(`[Notifications] out-for-delivery notify failed for ${id}:`, error.message),
+      );
 
       res.json({
         success: true,
@@ -878,7 +1055,8 @@ router.post(
         });
       }
 
-      if (order.dvcCode !== dvcCode.toUpperCase()) {
+      // The stored DVC is a salted hash, never the plaintext code.
+      if (!verifyCode(dvcCode.toUpperCase(), order.dvcCode)) {
         // Atomic increment so simultaneous wrong submissions all count.
         await global.prisma.Order.update({
           where: { id },
@@ -892,13 +1070,15 @@ router.post(
 
         if (
           attemptsSnapshot &&
-          attemptsSnapshot.dvcAttempts >= 3 &&
+          attemptsSnapshot.dvcAttempts >= config.dvc.maxAttempts &&
           !attemptsSnapshot.dvcLockedUntil
         ) {
           await global.prisma.Order.updateMany({
             where: { id, dvcLockedUntil: null },
             data: {
-              dvcLockedUntil: new Date(Date.now() + 30 * 60 * 1000),
+              dvcLockedUntil: new Date(
+                Date.now() + config.dvc.lockoutMinutes * 60 * 1000,
+              ),
             },
           });
         }

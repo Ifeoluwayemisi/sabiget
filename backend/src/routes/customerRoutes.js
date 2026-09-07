@@ -3,7 +3,7 @@
 // ============================================
 
 import express from "express";
-import { authenticateToken, optionalAuth } from "../middleware/auth.js";
+import { authenticateToken, authorize, optionalAuth } from "../middleware/auth.js";
 import { createMemberAccountService } from "../services/memberAuthService.js";
 import { findNearbyVendors, isValidCoordinates } from "../utils/location.js";
 import {
@@ -190,7 +190,7 @@ router.get("/vendors/:vendorId/menu", optionalAuth, async (req, res) => {
  * GET /api/v1/customers/orders/:orderId
  * Get order details & real-time status
  */
-router.get("/orders/:orderId", authenticateToken, async (req, res) => {
+router.get("/orders/:orderId", authenticateToken, authorize("GUEST", "MEMBER"), async (req, res) => {
   try {
     const { orderId } = req.params;
     const userId = req.user.userId;
@@ -306,7 +306,7 @@ router.get("/orders/:orderId", authenticateToken, async (req, res) => {
  * GET /api/v1/customers/loyalty-points
  * Get user's loyalty points balance
  */
-router.get("/loyalty-points", authenticateToken, async (req, res) => {
+router.get("/loyalty-points", authenticateToken, authorize("GUEST", "MEMBER"), async (req, res) => {
   try {
     const userId = req.user.userId;
 
@@ -352,7 +352,7 @@ router.get("/loyalty-points", authenticateToken, async (req, res) => {
  * GET /api/v1/customers/order-history
  * Get customer's order history with filtering
  */
-router.get("/order-history", authenticateToken, async (req, res) => {
+router.get("/order-history", authenticateToken, authorize("GUEST", "MEMBER"), async (req, res) => {
   try {
     const userId = req.user.userId;
     const { status, page = 1, limit = 10 } = req.query;
@@ -421,7 +421,7 @@ router.get("/order-history", authenticateToken, async (req, res) => {
  * POST /api/v1/customers/orders/:orderId/review
  * Submit review for completed order
  */
-router.post("/orders/:orderId/review", authenticateToken, async (req, res) => {
+router.post("/orders/:orderId/review", authenticateToken, authorize("GUEST", "MEMBER"), async (req, res) => {
   try {
     const { orderId } = req.params;
     const { rating, comment, foodQuality, deliverySpeed, driverBehavior } =
@@ -638,7 +638,7 @@ router.get("/vendors/:vendorId/reviews", async (req, res) => {
  * GET /api/v1/customers/orders/:orderId/review
  * Get review for a specific order (if exists)
  */
-router.get("/orders/:orderId/review", authenticateToken, async (req, res) => {
+router.get("/orders/:orderId/review", authenticateToken, authorize("GUEST", "MEMBER"), async (req, res) => {
   try {
     const { orderId } = req.params;
     const userId = req.user.userId;
@@ -702,7 +702,7 @@ router.get("/orders/:orderId/review", authenticateToken, async (req, res) => {
  * POST /api/v1/customers/loyalty-points/redeem
  * Redeem loyalty points for discount
  */
-router.post("/loyalty-points/redeem", authenticateToken, async (req, res) => {
+router.post("/loyalty-points/redeem", authenticateToken, authorize("GUEST", "MEMBER"), async (req, res) => {
   try {
     const { pointsToRedeem } = req.body;
     const userId = req.user.userId;
@@ -743,7 +743,7 @@ router.post("/loyalty-points/redeem", authenticateToken, async (req, res) => {
  * GET /api/v1/customers/insights
  * Get customer's insights (spend, frequency, preferences)
  */
-router.get("/insights", authenticateToken, async (req, res) => {
+router.get("/insights", authenticateToken, authorize("GUEST", "MEMBER"), async (req, res) => {
   try {
     const userId = req.user.userId;
 
@@ -772,7 +772,7 @@ router.get("/insights", authenticateToken, async (req, res) => {
  * GET /api/v1/customers/recommendations
  * Get personalized vendor recommendations
  */
-router.get("/recommendations", authenticateToken, async (req, res) => {
+router.get("/recommendations", authenticateToken, authorize("GUEST", "MEMBER"), async (req, res) => {
   try {
     const userId = req.user.userId;
     const { latitude, longitude, radius = 5 } = req.query;
@@ -825,7 +825,7 @@ router.get("/recommendations", authenticateToken, async (req, res) => {
  * POST /api/v1/customers/create-account
  * Convert GUEST to MEMBER (set password, email)
  */
-router.post("/create-account", authenticateToken, async (req, res) => {
+router.post("/create-account", authenticateToken, authorize("GUEST", "MEMBER"), async (req, res) => {
   try {
     const { email, password, name } = req.body;
 

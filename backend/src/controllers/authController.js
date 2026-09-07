@@ -4,16 +4,20 @@
 
 import { sendOTPService, verifyOTPService } from "../services/authService.js";
 import { generateAccessToken, verifyRefreshToken } from "../utils/jwt.js";
+import config from "../config.js";
 
 const getPrisma = () => global.prisma;
 
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 /**
  * POST /api/v1/auth/send-otp
- * Send OTP to customer's phone via WhatsApp/SMS
+ * Send OTP to a customer (WhatsApp first; email fallback).
+ * Body: { phone: "+2348123456789", email?: "user@example.com" }
  */
 export async function sendOTP(req, res) {
   try {
-    const { phone } = req.body;
+    const { phone, email } = req.body;
 
     if (!phone) {
       return res.status(400).json({
@@ -31,16 +35,32 @@ export async function sendOTP(req, res) {
       });
     }
 
-    const result = await sendOTPService(phone);
+    if (email !== undefined && email !== null && email !== "") {
+      if (!EMAIL_REGEX.test(email)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid email address",
+        });
+      }
+    }
+
+    const result = await sendOTPService(phone, email || null);
 
     if (result.success) {
+      const hintByChannel = {
+        WHATSAPP: "Check your WhatsApp for your verification code.",
+        EMAIL: "Check your email for your verification code.",
+        CONSOLE: "Verification code printed to the server console (development mode).",
+      };
+
       return res.status(200).json({
         success: true,
         message: result.message,
         channel: result.channel,
+        mode: result.mode,
         otpId: result.otpId,
-        expiresIn: "10 minutes",
-        hint: "Check your WhatsApp first, SMS will arrive if WhatsApp fails",
+        expiresIn: `${config.otp.expiryMinutes} minutes`,
+        hint: hintByChannel[result.channel] || "Check your WhatsApp or email.",
       });
     }
 

@@ -87,7 +87,45 @@ describe("auth endpoint verification", () => {
 
     expect(response.status).toBe(200);
     expect(response.body.success).toBe(true);
-    expect(sendOTPService).toHaveBeenCalledWith("+2348123456789");
+    expect(sendOTPService).toHaveBeenCalledWith("+2348123456789", null);
+  });
+
+  it("sends otp with an optional email fallback address", async () => {
+    sendOTPService.mockResolvedValue({
+      success: true,
+      message: "OTP sent via Email",
+      channel: "EMAIL",
+      otpId: "otp_2",
+    });
+
+    const response = await server.request("/send-otp", {
+      method: "POST",
+      body: JSON.stringify({
+        phone: "+2348123456789",
+        email: "user@example.com",
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.body.success).toBe(true);
+    expect(sendOTPService).toHaveBeenCalledWith(
+      "+2348123456789",
+      "user@example.com",
+    );
+  });
+
+  it("rejects an invalid optional email address", async () => {
+    const response = await server.request("/send-otp", {
+      method: "POST",
+      body: JSON.stringify({
+        phone: "+2348123456789",
+        email: "not-an-email",
+      }),
+    });
+
+    expect(response.status).toBe(400);
+    expect(response.body.message).toContain("Invalid email address");
+    expect(sendOTPService).not.toHaveBeenCalled();
   });
 
   it("verifies otp and returns tokens", async () => {

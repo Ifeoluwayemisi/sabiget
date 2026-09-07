@@ -1,15 +1,26 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { motion } from "framer-motion";
 import {
   CheckCircle2,
   Clock3,
   ShoppingBag,
+  Store,
   Wallet,
+  Mail,
+  Lock,
+  Phone,
+  ArrowLeft,
 } from "lucide-react";
 import type { Socket } from "socket.io-client";
-import { apiRequest } from "@/lib/api/client";
+import {
+  apiRequest,
+  getAccessToken,
+  storeAuthPayload,
+  subscribeToAuth,
+} from "@/lib/api/client";
 import {
   getSocket,
   joinVendorRoom,
@@ -70,16 +81,96 @@ const statusLabel: Record<string, string> = {
 };
 
 export default function VendorDashboardPage() {
-  const [loading, setLoading] = useState(true);
+  // Start loading only when a session already exists; otherwise the auth gate
+  // renders immediately on first paint instead of flashing a spinner.
+  const [loading, setLoading] = useState(() => getAccessToken() !== null);
   const [dashboard, setDashboard] = useState<VendorDashboardData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [submittingId, setSubmittingId] = useState<string | null>(null);
   const [dvcMap, setDvcMap] = useState<Record<string, string>>({});
 
-  const token = useMemo(() => {
-    if (typeof window === "undefined") return null;
-    return localStorage.getItem("accessToken");
-  }, []);
+  // Track auth via the shared client so logging in/out (anywhere) rerenders
+  // the gate immediately, rather than reading localStorage once on mount.
+  const [token, setToken] = useState<string | null>(() => getAccessToken());
+  const [authMode, setAuthMode] = useState<"signin" | "signup">("signin");
+  const [authForm, setAuthForm] = useState({
+    email: "",
+    password: "",
+    businessName: "",
+    businessPhone: "",
+  });
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [authSubmitting, setAuthSubmitting] = useState(false);
+
+  useEffect(() => subscribeToAuth(() => setToken(getAccessToken())), []);
+
+  const handleVendorAuth = async () => {
+    const isSignup = authMode === "signup";
+
+    if (!authForm.email || !authForm.password) {
+      setAuthError("Email and password are required.");
+      return;
+    }
+    if (isSignup) {
+      if (!authForm.businessName.trim() || !authForm.businessPhone.trim()) {
+        setAuthError("Business name and phone are required.");
+        return;
+      }
+      if (authForm.password.length < 8) {
+        setAuthError("Password must be at least 8 characters.");
+        return;
+      }
+    }
+
+    setAuthSubmitting(true);
+    setAuthError(null);
+
+    try {
+      const response = await apiRequest(
+        isSignup ? "/auth/vendor/signup" : "/auth/vendor/login",
+        {
+          method: "POST",
+          body: JSON.stringify(
+            isSignup
+              ? {
+                  email: authForm.email,
+                  password: authForm.password,
+                  businessName: authForm.businessName,
+                  businessPhone: authForm.businessPhone,
+                }
+              : {
+                  email: authForm.email,
+                  password: authForm.password,
+                },
+          ),
+        },
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data.error || data.message || "Vendor authentication failed",
+        );
+      }
+
+      // Vendor sessions have no `user` field in the payload; only the tokens
+      // are persisted and the subscription below lifts the gate to dashboard.
+      storeAuthPayload({
+        accessToken: data.accessToken,
+        refreshToken: data.refreshToken,
+      });
+    } catch (authFailure) {
+      console.error("Vendor authentication failed:", authFailure);
+      setAuthError(
+        authFailure instanceof Error
+          ? authFailure.message
+          : "Vendor authentication failed.",
+      );
+    } finally {
+      setAuthSubmitting(false);
+    }
+  };
 
   const fetchDashboard = useCallback(async () => {
     if (!token) {
@@ -204,15 +295,175 @@ export default function VendorDashboardPage() {
   };
 
   if (!token && !loading) {
+    const isSignup = authMode === "signup";
     return (
-      <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4">
-        <div className="max-w-md rounded-2xl border border-gray-200 bg-white p-8 text-center shadow-sm">
-          <h1 className="text-2xl font-bold text-gray-900">
-            Vendor access required
+      <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4 py-10">
+        <div className="w-full max-w-md rounded-2xl border border-gray-200 bg-white p-8 shadow-sm">
+          <Link
+            href="/"
+            className="mb-4 inline-flex items-center gap-1 text-sm font-medium text-gray-500 hover:text-gray-700"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Back to SabiGet
+          </Link>
+
+          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-orange-50 text-orange-500">
+            <Store className="h-6 w-6" />
+          </div>
+          <h1 className="mt-4 text-2xl font-black text-gray-900">
+            Vendor dashboard
           </h1>
-          <p className="mt-3 text-gray-600">
-            Sign in with a vendor account to view and manage incoming orders.
+          <p className="mt-1 text-sm text-gray-600">
+            Sign in to view and manage your incoming orders. New businesses can
+            create an account below.
           </p>
+
+          <div className="mt-6 flex rounded-xl bg-gray-100 p-1">
+            <button
+              type="button"
+              onClick={() => {
+                setAuthMode("signin");
+                setAuthError(null);
+              }}
+              className={`flex-1 rounded-lg px-3 py-2 text-sm font-semibold transition ${
+                !isSignup
+                  ? "bg-white text-gray-900 shadow-sm"
+                  : "text-gray-500"
+              }`}
+            >
+              Sign in
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setAuthMode("signup");
+                setAuthError(null);
+              }}
+              className={`flex-1 rounded-lg px-3 py-2 text-sm font-semibold transition ${
+                isSignup
+                  ? "bg-white text-gray-900 shadow-sm"
+                  : "text-gray-500"
+              }`}
+            >
+              Create account
+            </button>
+          </div>
+
+          <div className="mt-6 space-y-4">
+            {isSignup && (
+              <>
+                <label className="block">
+                  <span className="mb-2 block text-sm font-medium text-gray-700">
+                    Business name
+                  </span>
+                  <div className="flex items-center gap-3 rounded-xl border border-gray-300 px-3 py-3 focus-within:border-orange-500">
+                    <Store className="h-4 w-4 text-gray-400" />
+                    <input
+                      type="text"
+                      value={authForm.businessName}
+                      onChange={(event) =>
+                        setAuthForm((prev) => ({
+                          ...prev,
+                          businessName: event.target.value,
+                        }))
+                      }
+                      className="w-full border-0 bg-transparent text-sm outline-none"
+                      placeholder="Buka & Flame"
+                    />
+                  </div>
+                </label>
+
+                <label className="block">
+                  <span className="mb-2 block text-sm font-medium text-gray-700">
+                    Business phone
+                  </span>
+                  <div className="flex items-center gap-3 rounded-xl border border-gray-300 px-3 py-3 focus-within:border-orange-500">
+                    <Phone className="h-4 w-4 text-gray-400" />
+                    <input
+                      type="tel"
+                      inputMode="tel"
+                      value={authForm.businessPhone}
+                      onChange={(event) =>
+                        setAuthForm((prev) => ({
+                          ...prev,
+                          businessPhone: event.target.value,
+                        }))
+                      }
+                      className="w-full border-0 bg-transparent text-sm outline-none"
+                      placeholder="+2348123456789"
+                    />
+                  </div>
+                </label>
+              </>
+            )}
+
+            <label className="block">
+              <span className="mb-2 block text-sm font-medium text-gray-700">
+                Email
+              </span>
+              <div className="flex items-center gap-3 rounded-xl border border-gray-300 px-3 py-3 focus-within:border-orange-500">
+                <Mail className="h-4 w-4 text-gray-400" />
+                <input
+                  type="email"
+                  autoComplete="email"
+                  value={authForm.email}
+                  onChange={(event) =>
+                    setAuthForm((prev) => ({
+                      ...prev,
+                      email: event.target.value,
+                    }))
+                  }
+                  className="w-full border-0 bg-transparent text-sm outline-none"
+                  placeholder="vendor@business.com"
+                />
+              </div>
+            </label>
+
+            <label className="block">
+              <span className="mb-2 block text-sm font-medium text-gray-700">
+                Password
+              </span>
+              <div className="flex items-center gap-3 rounded-xl border border-gray-300 px-3 py-3 focus-within:border-orange-500">
+                <Lock className="h-4 w-4 text-gray-400" />
+                <input
+                  type="password"
+                  autoComplete={
+                    isSignup ? "new-password" : "current-password"
+                  }
+                  value={authForm.password}
+                  onChange={(event) =>
+                    setAuthForm((prev) => ({
+                      ...prev,
+                      password: event.target.value,
+                    }))
+                  }
+                  className="w-full border-0 bg-transparent text-sm outline-none"
+                  placeholder="At least 8 characters"
+                />
+              </div>
+            </label>
+
+            {authError && (
+              <div
+                role="alert"
+                className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
+              >
+                {authError}
+              </div>
+            )}
+
+            <button
+              onClick={handleVendorAuth}
+              disabled={authSubmitting}
+              className="w-full rounded-xl bg-orange-500 px-4 py-3 text-sm font-bold text-white disabled:bg-gray-300"
+            >
+              {authSubmitting
+                ? "Please wait..."
+                : isSignup
+                  ? "Create vendor account"
+                  : "Sign in to dashboard"}
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -391,6 +642,20 @@ export default function VendorDashboardPage() {
                         <>
                           <button
                             onClick={() =>
+                              updateOrderStatus(order.id, "preparing")
+                            }
+                            disabled={submittingId === order.id}
+                            className="rounded-lg bg-amber-500 px-3 py-2 text-xs font-semibold text-white disabled:bg-amber-300"
+                          >
+                            Mark as preparing
+                          </button>
+                        </>
+                      )}
+
+                      {order.status === "PREPARING" && (
+                        <>
+                          <button
+                            onClick={() =>
                               updateOrderStatus(order.id, "out-for-delivery")
                             }
                             disabled={submittingId === order.id}
@@ -398,18 +663,6 @@ export default function VendorDashboardPage() {
                           >
                             Mark out for delivery
                           </button>
-                          <input
-                            type="text"
-                            value={dvcMap[order.id] || ""}
-                            onChange={(event) =>
-                              setDvcMap((prev) => ({
-                                ...prev,
-                                [order.id]: event.target.value,
-                              }))
-                            }
-                            placeholder="DVC code"
-                            className="min-w-[120px] rounded-lg border border-gray-300 bg-white px-2 py-2 text-xs text-gray-700 outline-none focus:border-orange-500"
-                          />
                         </>
                       )}
 

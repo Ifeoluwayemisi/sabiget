@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
   CheckCircle2,
   ExternalLink,
@@ -25,6 +25,16 @@ import type { UseCartReturn } from "@/hooks/useCart";
 import OrderStatusCard from "@/components/order/OrderStatusCard";
 
 const guestPhoneRegex = /^(\+234|0)[789]\d{9}$/;
+
+// Backend idempotency guard: the same logical checkout request must reuse the
+// same key (so a retried submit returns the already-created order), while a
+// materially different request (new items/address/phone) must get a new key.
+function createIdempotencyKey(): string {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
 
 interface CheckoutPanelProps {
   vendorId: string | null;
@@ -125,10 +135,12 @@ function PaymentStatusView({
     window.open(placedOrder.authorizationUrl, "_blank", "noopener,noreferrer");
   };
 
+  const canReopenPayment = Boolean(placedOrder.authorizationUrl);
+
   const copy: Record<PaymentStage, { title: string; body: string }> = {
     pending: {
       title: "Finish your payment",
-      body: paymentWindowOpened
+      body: paymentWindowOpened || !canReopenPayment
         ? "Your order is saved. Waiting for Paystack to confirm the payment — this usually takes a moment."
         : "Your order is saved. Complete payment in the Paystack window so the vendor can start preparing it.",
     },
@@ -169,7 +181,7 @@ function PaymentStatusView({
           {heading.body}
         </p>
 
-        {stage === "pending" && (
+        {stage === "pending" && canReopenPayment && (
           <>
             <button
               onClick={openPayment}
@@ -224,6 +236,9 @@ export default function CheckoutPanel({
   const [submitting, setSubmitting] = useState(false);
   const [feedback, setFeedback] = useState<Feedback>(null);
   const [placedOrder, setPlacedOrder] = useState<PlacedOrder | null>(null);
+
+  const idempotencyKeyRef = useRef<string | null>(null);
+  const idempotencySignatureRef = useRef<string | null>(null);
 
   // Coordinates are held in memory only and used solely for this checkout.
   useEffect(() => {
@@ -301,9 +316,32 @@ export default function CheckoutPanel({
         ...(hasAccessToken ? {} : { phone: guestPhone.trim() }),
       };
 
+      // Rotate the idempotency key only when the checkout intent actually
+      // changes, so a retried submit of the same order reuses the key and the
+      // backend returns the existing order instead of charging twice.
+      const signature = JSON.stringify({
+        vendorId,
+        items: payload.items,
+        phone: "phone" in payload ? payload.phone : null,
+        deliveryAddress: payload.deliveryAddress,
+        deliveryLat: payload.deliveryLat ?? null,
+        deliveryLng: payload.deliveryLng ?? null,
+      });
+      if (
+        !idempotencyKeyRef.current ||
+        signature !== idempotencySignatureRef.current
+      ) {
+        idempotencyKeyRef.current = createIdempotencyKey();
+        idempotencySignatureRef.current = signature;
+      }
+
       const response = await apiRequest(
         `/orders${hasAccessToken ? "" : "/guest-checkout"}`,
-        { method: "POST", body: JSON.stringify(payload) },
+        {
+          method: "POST",
+          body: JSON.stringify(payload),
+          headers: { "x-idempotency-key": idempotencyKeyRef.current },
+        },
       );
 
       const data = await response.json().catch(() => ({}));

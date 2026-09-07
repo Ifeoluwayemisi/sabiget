@@ -16,13 +16,14 @@ export function generateOTP(length = 6) {
 
 /**
  * Generate a DVC (Delivery Verification Code)
- * 6-character alphanumeric (e.g., XJ42K9)
+ * Alphanumeric (e.g., XJ42K9), length comes from configuration.
+ * @param {number} length - Length of the DVC (default 6)
  * @returns {string} DVC code
  */
-export function generateDVC() {
+export function generateDVC(length = 6) {
   const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
   let dvc = "";
-  for (let i = 0; i < 6; i++) {
+  for (let i = 0; i < length; i++) {
     dvc += chars.charAt(crypto.randomInt(0, chars.length));
   }
   return dvc;

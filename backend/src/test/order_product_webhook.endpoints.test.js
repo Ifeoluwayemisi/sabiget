@@ -222,6 +222,125 @@ describe("product, order, and webhook endpoint verification", () => {
     });
   });
 
+  it("persists the request idempotency key on a guest checkout order", async () => {
+    prisma.User.findUnique.mockResolvedValue(null);
+    prisma.User.create.mockResolvedValue({ id: "guest_key", email: null });
+    prisma.Order.findUnique.mockResolvedValue(null);
+    prisma.Vendor.findUnique.mockResolvedValue({
+      id: "vendor_1",
+      paystackSubcode: "SUB_1",
+    });
+    prisma.Product.findUnique.mockResolvedValue({
+      id: "p1",
+      vendorId: "vendor_1",
+      isAvailable: true,
+      price: 2000,
+    });
+    prisma.Order.create.mockResolvedValue({ id: "order_guest_key" });
+    prisma.Order.update.mockResolvedValue({ id: "order_guest_key" });
+    initializePayment.mockResolvedValue({
+      success: true,
+      data: { authorization_url: "https://pay", access_code: "acc_key" },
+    });
+
+    const response = await orderServer.request("/guest-checkout", {
+      method: "POST",
+      headers: { "x-idempotency-key": "idem_g1" },
+      body: JSON.stringify({
+        phone: "+2348123456789",
+        vendorId: "vendor_1",
+        items: [{ productId: "p1", quantity: 1 }],
+        deliveryAddress: "1 Guest Road",
+      }),
+    });
+
+    expect(response.status).toBe(201);
+    expect(prisma.Order.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ idempotencyKey: "idem_g1" }),
+      }),
+    );
+    expect(initializePayment).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns the existing order for an idempotent guest checkout retry", async () => {
+    prisma.User.findUnique.mockResolvedValue({
+      id: "guest_1",
+      email: null,
+      role: "GUEST",
+    });
+    prisma.Order.findUnique.mockResolvedValue({
+      id: "order_existing",
+      userId: "guest_1",
+      paymentReference: "ref_existing",
+      paystackAccessCode: "acc_existing",
+      idempotencyKey: "idem_g1",
+      status: "UNPAID",
+    });
+
+    const response = await orderServer.request("/guest-checkout", {
+      method: "POST",
+      headers: { "x-idempotency-key": "idem_g1" },
+      body: JSON.stringify({
+        phone: "+2348123456789",
+        vendorId: "vendor_1",
+        items: [{ productId: "p1", quantity: 1 }],
+        deliveryAddress: "1 Guest Road",
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual(
+      expect.objectContaining({
+        success: true,
+        message: "Existing order returned for idempotent request",
+        orderId: "order_existing",
+        reference: "ref_existing",
+        paystackAccessCode: "acc_existing",
+        idempotencyKey: "idem_g1",
+        status: "UNPAID",
+      }),
+    );
+    expect(typeof response.body.guestOrderToken).toBe("string");
+    expect(prisma.Order.create).not.toHaveBeenCalled();
+    expect(initializePayment).not.toHaveBeenCalled();
+  });
+
+  it("returns 409 when an idempotency key is reused by a different guest phone", async () => {
+    prisma.User.findUnique.mockResolvedValue({
+      id: "guest_1",
+      email: null,
+      role: "GUEST",
+    });
+    prisma.Order.findUnique.mockResolvedValue({
+      id: "order_existing",
+      userId: "guest_other",
+      paymentReference: "ref_existing",
+      paystackAccessCode: null,
+      idempotencyKey: "idem_shared",
+      status: "UNPAID",
+    });
+
+    const response = await orderServer.request("/guest-checkout", {
+      method: "POST",
+      headers: { "x-idempotency-key": "idem_shared" },
+      body: JSON.stringify({
+        phone: "+2348123456789",
+        vendorId: "vendor_1",
+        items: [{ productId: "p1", quantity: 1 }],
+        deliveryAddress: "1 Guest Road",
+      }),
+    });
+
+    expect(response.status).toBe(409);
+    expect(response.body).toEqual({
+      success: false,
+      error: "Idempotency key already used by another user",
+    });
+    expect(prisma.Order.create).not.toHaveBeenCalled();
+    expect(initializePayment).not.toHaveBeenCalled();
+  });
+
   it("lets a guest track their own paid order with the limited-scope token", async () => {
     prisma.Order.findUnique.mockResolvedValue({
       id: "order_guest",

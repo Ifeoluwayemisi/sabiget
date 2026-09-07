@@ -42,25 +42,57 @@ http://localhost:5000/api/v1
 
 ## 🔐 Authentication Flow (For Frontend)
 
-### USER TYPES:
+### USER TYPES (internal, never shown as UI labels)
 
-- **GUEST**: Browse and checkout with OTP only (no password)
-- **MEMBER**: Guest → Member conversion (add password post-order)
-- **VENDOR**: Separate portal (vendor.sabiget.com) with 2FA
-- **ADMIN**: Hidden URL with 2FA
+- **GUEST**: Created on first OTP verification. Browse + checkout with OTP only (no password).
+- **MEMBER**: Guest → Member conversion by setting a password (`POST /auth/create-account`).
+- **VENDOR**: Separate onboarding portal. Login/signup is email + password (NOT 2FA — see vendor flow below).
+- **ADMIN**: Admin-only operations, backend-enforced.
+
+The frontend auth modal presents *intent* options — **Sign in**, **Create account**, or **Continue as guest** — never the internal GUEST/MEMBER role names. Vendor onboarding is separate at `/vendor-dashboard`.
+
+---
+
+### OTP DELIVERY (development vs production)
+
+- The backend prefers WhatsApp, then email, when providers are configured.
+- **In development (no providers configured)** the code is printed to the **backend server console** via the explicit `CONSOLE` channel, implemented in `backend/src/utils/notifications.js`. The line is formatted as:
+
+```text
+[DEV OTP] channel=CONSOLE otpId=<id> expiresIn=<minutes>min code=<code>
+```
+
+- `POST /auth/send-otp` never returns the code. It returns a `hint` describing the channel (e.g. "Verification code printed to the server console (development mode)."). The frontend surfaces this hint on the OTP screen.
+- **In production** the code must never appear in logs or responses; only the provider delivery path is used.
 
 ---
 
 ### CUSTOMER FLOW (Landing Page Users)
+
+The AuthModal drives a step machine: `choose → phone → otp → (details)`.
+
+- **Sign in** / **Continue as guest**: phone → send OTP → verify → session stored.
+- **Create account**: phone → send OTP → verify (temporary GUEST session) → collect name/email/password → `POST /auth/create-account` converts to MEMBER.
+- The OTP screen exposes **Change phone number** (returns to the phone step, clears the OTP and resets the sent-phone so resending targets the new number) and **Resend code**. Verification is bound to the phone the code was issued for.
+- Vendor onboarding is NOT inside this modal — an entry link routes to `/vendor-dashboard`.
 
 #### 1. **Send OTP** (No auth required)
 
 ```javascript
 POST /auth/send-otp
 {
-  "phone": "+2348123456789"
+  "phone": "+2348123456789",
+  "email": "you@email.com"  // optional; email fallback when WhatsApp unavailable
 }
-Response: { "success": true, "message": "OTP sent" }
+Response: {
+  "success": true,
+  "message": "OTP sent",
+  "channel": "CONSOLE",          // WHATSAPP | EMAIL | CONSOLE
+  "mode": "console",
+  "otpId": "otp_123",
+  "expiresIn": "10 minutes",
+  "hint": "Verification code printed to the server console (development mode)."
+}
 ```
 
 #### 2. **Verify OTP & Get Token** (Creates GUEST user on first time)
@@ -68,22 +100,26 @@ Response: { "success": true, "message": "OTP sent" }
 ```javascript
 POST /auth/verify-otp
 {
-  "phone": "+2348123456789",
-  "code": "123456"  // From SMS/WhatsApp
+  "phone": "+2348123456789",   // the phone the code was issued for
+  "code": "123456"             // from the [DEV OTP] console line / WhatsApp / email
 }
 Response: {
   "success": true,
+  "message": "Login successful",
   "accessToken": "eyJhbGc...",
   "refreshToken": "...",
+  "expiresIn": "15 minutes",
+  "refreshExpiresIn": "7 days",
   "user": {
     "id": "user_123",
     "phone": "+2348123456789",
-    "role": "GUEST",
-    "isVerified": false
-  },
-  "isNewUser": true
+    "role": "GUEST",           // GUEST until converted to MEMBER
+    "isVerified": true
+  }
 }
 ```
+
+Errors are `401` with actionable messages, e.g. invalid OTP, expired OTP, or OTP locked after too many attempts (the lockout period is configured server-side; the response may include `attemptsRemaining`).
 
 #### 3. **Use Token in Requests**
 
@@ -114,22 +150,28 @@ Response: {
 }
 ```
 
-#### 5. **Convert to MEMBER** (Post-order - optional)
+#### 5. **Convert to MEMBER** (optional)
 
 ```javascript
 POST /auth/create-account
-Headers: { Authorization: "Bearer accessToken" }
+Headers: { Authorization: "Bearer accessToken" }    // temporary GUEST token from step 2
 {
-  "password": "securePass123",
+  "password": "securePass123",   // required, min 8 characters
   "name": "John Doe",
   "email": "john@example.com"
 }
 Response: {
   "success": true,
   "message": "Account upgraded to MEMBER",
-  "user": { "role": "MEMBER", "email": "john@example.com" }
+  "user": { "role": "MEMBER", "email": "john@example.com" },
+  "accessToken": "...",
+  "refreshToken": "...",
+  "expiresIn": "15 minutes",
+  "refreshExpiresIn": "7 days"
 }
 ```
+
+If the phone is already a MEMBER, verify-otp logs that account in and `create-account` rejects; the UI should route the user back to **Sign in** instead of treating it as a hard error.
 
 #### 6. **Member Login** (After password set)
 
@@ -140,15 +182,20 @@ POST /auth/login
   "password": "securePass123"
 }
 Response: {
+  "success": true,
   "accessToken": "...",
   "refreshToken": "...",
+  "expiresIn": "15 minutes",
+  "refreshExpiresIn": "7 days",
   "user": { "role": "MEMBER" }
 }
 ```
 
 ---
 
-### VENDOR FLOW (Separate Portal - vendor.sabiget.com)
+### VENDOR FLOW (Separate onboarding at `/vendor-dashboard`)
+
+Vendor authentication is email + password (no 2FA endpoint currently exists in the backend). The `/vendor-dashboard` page renders a Sign in / Create account panel when no vendor token is present; a successful reply stores `accessToken`/`refreshToken` and loads the dashboard.
 
 #### 1. **Vendor Signup** (New business owner)
 
@@ -159,46 +206,32 @@ POST /auth/vendor/signup
   "password": "securePass123",
   "businessName": "Pizza Palace",
   "businessPhone": "+2348012345678",
-  "businessCategory": "Food & Beverage"
+  "businessCategory": "Food & Beverage"   // optional
 }
 Response: {
   "success": true,
-  "vendor": { "vendorId": "vendor_123" },
-  "nextStep": "Setup 2FA at /auth/vendor/setup-2fa"
+  "message": "Vendor account created successfully",
+  "accessToken": "...",
+  "refreshToken": "...",
+  "expiresIn": "15 minutes",
+  "vendor": {
+    "id": "vendor_123",
+    "vendorId": "vendor_123",
+    "userId": "user_123",
+    "name": "Pizza Palace",
+    "businessName": "Pizza Palace",
+    "phone": "+2348012345678",
+    "businessPhone": "+2348012345678",
+    "isVerified": false,
+    "isApproved": false,
+    "nextStep": "Complete vendor dashboard setup"
+  }
 }
 ```
 
-#### 2. **Vendor Setup 2FA** (Two-factor authentication)
+Duplicate email → `409`, invalid business phone → `400`.
 
-```javascript
-POST /auth/vendor/setup-2fa
-Headers: { Authorization: "Bearer accessToken" }
-{
-  "method": "email"  // or "sms"
-}
-Response: {
-  "success": true,
-  "message": "2FA code sent via email",
-  "expiresIn": "10 minutes"
-}
-```
-
-#### 3. **Vendor Verify 2FA**
-
-```javascript
-POST /auth/vendor/verify-2fa
-Headers: { Authorization: "Bearer accessToken" }
-{
-  "code": "482917"
-}
-Response: {
-  "success": true,
-  "vendor": { "isApproved": false },
-  "nextStep": "Awaiting admin approval or access dashboard if approved"
-}
-```
-
-#### 4. **Vendor Login** (Subsequent logins)
+#### 2. **Vendor Login** (Subsequent logins)
 
 ```javascript
 POST /auth/vendor/login
@@ -207,11 +240,15 @@ POST /auth/vendor/login
   "password": "securePass123"
 }
 Response: {
+  "success": true,
   "accessToken": "...",
   "refreshToken": "...",
-  "vendor": { "vendorId": "vendor_123", "isApproved": true }
+  "expiresIn": "15 minutes",
+  "vendor": { "id": "vendor_123", "isApproved": false }
 }
 ```
+
+Wrong credentials → `401`; suspended/forbidden accounts → `403`.
 
 ---
 

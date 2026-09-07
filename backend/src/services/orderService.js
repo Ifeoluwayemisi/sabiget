@@ -143,6 +143,52 @@ async function autoKillExpiredPendingOrders(limit = 50) {
   return processed;
 }
 
+/**
+ * Retry stranded refunds. A cancelled order whose Paystack refund call
+ * failed (transiently) currently keeps `refundInitiatedAt` cleared, so a
+ * background sweep re-arms the atomic claim until Paystack accepts it.
+ *
+ * Only statuses that ALWAYS follow a confirmed payment are swept. Failed
+ * charges also land on CANCELLED_CUSTOMER but are never captured, so they
+ * are deliberately excluded to avoid refund noise on money that was never
+ * taken.
+ */
+async function retryFailedRefunds(limit = 50) {
+  const stranded = await getPrisma().Order.findMany({
+    where: {
+      status: {
+        in: ["CANCELLED_VENDOR", "CANCELLED_AUTO_KILL", "CANCELLED_ADMIN"],
+      },
+      refundInitiatedAt: null,
+      refundCompletedAt: null,
+    },
+    take: limit,
+    orderBy: {
+      cancelledAt: "asc",
+    },
+  });
+
+  let processed = 0;
+
+  for (const order of stranded) {
+    try {
+      const result = await triggerOrderRefund(
+        order,
+        "Retry refund for cancelled order",
+      );
+      if (result.success) {
+        processed += 1;
+      }
+    } catch (error) {
+      console.error(
+        `[Refunds] Retry failed for order ${order.id}: ${error.message}`,
+      );
+    }
+  }
+
+  return processed;
+}
+
 async function completeDeliveredOrder(orderId, notes = "Order payout unlocked") {
   const order = await getPrisma().Order.findUnique({
     where: { id: orderId },
@@ -216,5 +262,6 @@ export {
   triggerOrderRefund,
   autoKillExpiredPendingOrder,
   autoKillExpiredPendingOrders,
+  retryFailedRefunds,
   completeDeliveredOrder,
 };
