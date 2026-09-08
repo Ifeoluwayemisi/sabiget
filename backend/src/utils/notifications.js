@@ -1,38 +1,28 @@
 // ============================================
 // Notification Providers
 //   WhatsApp: Meta WhatsApp Cloud API (primary, incl. OTP auth messages)
-//   Email:    Resend (OTP fallback + transactional mirror)
+//   Email:    Brevo (OTP fallback + transactional mirror)
 // ============================================
 //
 // SabiGet deliberately has NO SMS and NO fake/local provider. When no real
 // provider is configured the ONLY fallback is an explicitly-labelled
 // DEVELOPMENT console channel so QA can complete flows. The response never
 // claims a live delivery when only the console channel was used.
+//
+// Fallback policy: WhatsApp -> Brevo email -> development console (dev
+// environments only; production never prints the code).
 
 import axios from "axios";
-
-const META_GRAPH_VERSION = "v20.0";
-
-function getConfig() {
-  return {
-    nodeEnv: process.env.NODE_ENV || "development",
-    whatsappToken: process.env.META_WHATSAPP_TOKEN || "",
-    whatsappPhoneNumberId: process.env.META_WHATSAPP_PHONE_NUMBER_ID || "",
-    whatsappOrderTemplate:
-      process.env.META_WHATSAPP_ORDER_TEMPLATE || "sabiget_order_status",
-    resendApiKey: process.env.RESEND_API_KEY || "",
-    resendFrom:
-      process.env.RESEND_FROM_EMAIL || "SabiGet <no-reply@sabiget.com>",
-  };
-}
+import { getNotificationsConfig } from "../config.js";
 
 export function isWhatsAppConfigured() {
-  const { whatsappToken, whatsappPhoneNumberId } = getConfig();
-  return Boolean(whatsappToken && whatsappPhoneNumberId);
+  const { whatsappAccessToken, whatsappPhoneNumberId } =
+    getNotificationsConfig();
+  return Boolean(whatsappAccessToken && whatsappPhoneNumberId);
 }
 
 export function isEmailConfigured() {
-  return Boolean(getConfig().resendApiKey);
+  return Boolean(getNotificationsConfig().brevoApiKey);
 }
 
 /** Normalize +234/0/234 phone formats to a dialable E.164-style number. */
@@ -44,36 +34,79 @@ function normalizeToE164(phone) {
   return digits;
 }
 
+/** Extract a safe provider failure reason (incl. the API response body). */
+function providerErrorMessage(error) {
+  const detail =
+    error?.response?.data?.error?.message ||
+    error?.response?.data?.message ||
+    error?.message;
+  return detail || "Unknown provider error";
+}
+
 // ---- WhatsApp Cloud API ----------------------------------------------
 
-/** OTP via the documented WhatsApp Cloud API authentication message. */
+/**
+ * OTP via WhatsApp.
+ *
+ * When META_WHATSAPP_OTP_TEMPLATE is set (default "sabiget_otp") the approved
+ * authentication template is sent by name; the template body is expected to
+ * carry {{1}} for the code and {{2}} for the validity window in minutes.
+ * When no template is configured, the documented authentication message type
+ * is used instead (Meta routes it to the WABA's approved auth template).
+ */
 async function sendWhatsAppOtp({ phone, code, expiryMinutes }) {
-  const { whatsappToken, whatsappPhoneNumberId } = getConfig();
+  const {
+    whatsappAccessToken,
+    whatsappPhoneNumberId,
+    whatsappApiVersion,
+    whatsappOtpTemplate,
+  } = getNotificationsConfig();
   const to = normalizeToE164(phone);
-  if (!to || !whatsappToken || !whatsappPhoneNumberId) {
+  if (!to || !whatsappAccessToken || !whatsappPhoneNumberId) {
     return { success: false, error: "WhatsApp provider not configured" };
   }
 
-  const response = await axios.post(
-    `https://graph.facebook.com/${META_GRAPH_VERSION}/${whatsappPhoneNumberId}/messages`,
-    {
-      messaging_product: "whatsapp",
-      recipient_type: "individual",
-      to,
-      type: "authentication",
-      authentication: {
-        method: "message",
-        message:
-          "Your SabiGet verification code is {{1}}. It expires in {{2}} minutes and is valid once. Do not share it.",
-        otp_code: code,
-        validity_period: Number(expiryMinutes) * 60,
-      },
-    },
-    {
-      headers: { Authorization: `Bearer ${whatsappToken}` },
-      timeout: 15000,
-    },
-  );
+  const url = `https://graph.facebook.com/${whatsappApiVersion}/${whatsappPhoneNumberId}/messages`;
+  const headers = { Authorization: `Bearer ${whatsappAccessToken}` };
+
+  const payload = whatsappOtpTemplate
+    ? {
+        messaging_product: "whatsapp",
+        recipient_type: "individual",
+        to,
+        type: "template",
+        template: {
+          name: whatsappOtpTemplate,
+          language: { code: "en" },
+          components: [
+            {
+              type: "body",
+              parameters: [
+                { type: "text", text: String(code) },
+                { type: "text", text: String(expiryMinutes) },
+              ],
+            },
+          ],
+        },
+      }
+    : {
+        messaging_product: "whatsapp",
+        recipient_type: "individual",
+        to,
+        type: "authentication",
+        authentication: {
+          method: "message",
+          message:
+            "Your SabiGet verification code is {{1}}. It expires in {{2}} minutes and is valid once. Do not share it.",
+          otp_code: code,
+          validity_period: Number(expiryMinutes) * 60,
+        },
+      };
+
+  const response = await axios.post(url, payload, {
+    headers,
+    timeout: 15000,
+  });
 
   return response.data?.messages?.[0]?.id
     ? { success: true }
@@ -82,14 +115,18 @@ async function sendWhatsAppOtp({ phone, code, expiryMinutes }) {
 
 /** Transactional (business-initiated) WhatsApp template message. */
 async function sendWhatsAppTemplate({ phone, templateName, bodyParams }) {
-  const { whatsappToken, whatsappPhoneNumberId } = getConfig();
+  const {
+    whatsappAccessToken,
+    whatsappPhoneNumberId,
+    whatsappApiVersion,
+  } = getNotificationsConfig();
   const to = normalizeToE164(phone);
-  if (!to || !whatsappToken || !whatsappPhoneNumberId) {
+  if (!to || !whatsappAccessToken || !whatsappPhoneNumberId) {
     return { success: false, error: "WhatsApp provider not configured" };
   }
 
   const response = await axios.post(
-    `https://graph.facebook.com/${META_GRAPH_VERSION}/${whatsappPhoneNumberId}/messages`,
+    `https://graph.facebook.com/${whatsappApiVersion}/${whatsappPhoneNumberId}/messages`,
     {
       messaging_product: "whatsapp",
       recipient_type: "individual",
@@ -110,7 +147,7 @@ async function sendWhatsAppTemplate({ phone, templateName, bodyParams }) {
       },
     },
     {
-      headers: { Authorization: `Bearer ${whatsappToken}` },
+      headers: { Authorization: `Bearer ${whatsappAccessToken}` },
       timeout: 15000,
     },
   );
@@ -120,30 +157,37 @@ async function sendWhatsAppTemplate({ phone, templateName, bodyParams }) {
     : { success: false, error: "WhatsApp API did not return a message id" };
 }
 
-// ---- Resend -----------------------------------------------------------
+// ---- Brevo (email) ----------------------------------------------------
 
 async function sendEmail({ to, subject, text }) {
-  const { resendApiKey, resendFrom } = getConfig();
-  if (!resendApiKey) {
+  const { brevoApiKey, brevoSenderName, brevoSenderEmail } =
+    getNotificationsConfig();
+  if (!brevoApiKey) {
     return { success: false, error: "Email provider not configured" };
   }
 
   const response = await axios.post(
-    "https://api.resend.com/emails",
+    "https://api.brevo.com/v3/smtp/email",
     {
-      from: resendFrom,
-      to: [to],
+      sender: {
+        name: brevoSenderName || "SabiGet",
+        email: brevoSenderEmail || "no-reply@sabiget.com",
+      },
+      to: [{ email: to }],
       subject,
-      text,
-      html: text.replace(/\n/g, "<br/>"),
+      textContent: text,
     },
     {
-      headers: { Authorization: `Bearer ${resendApiKey}` },
+      headers: {
+        "api-key": brevoApiKey,
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
       timeout: 15000,
     },
   );
 
-  return response.data?.id
+  return response.data?.messageId
     ? { success: true }
     : { success: false, error: "Email API did not return a message id" };
 }
@@ -165,7 +209,7 @@ export async function sendOtpNotification({
   expiryMinutes,
   otpId,
 }) {
-  const { nodeEnv } = getConfig();
+  const { nodeEnv } = getNotificationsConfig();
   const isProd = nodeEnv === "production";
 
   if (isWhatsAppConfigured()) {
@@ -179,7 +223,7 @@ export async function sendOtpNotification({
       );
     } catch (error) {
       console.error(
-        `[Notifications] WhatsApp OTP error for ${phone}: ${error.message}`,
+        `[Notifications] WhatsApp OTP error for ${phone}: ${providerErrorMessage(error)}`,
       );
     }
   }
@@ -199,7 +243,7 @@ export async function sendOtpNotification({
       );
     } catch (error) {
       console.error(
-        `[Notifications] Email OTP error for ${email}: ${error.message}`,
+        `[Notifications] Email OTP error for ${email}: ${providerErrorMessage(error)}`,
       );
     }
   }
@@ -250,7 +294,7 @@ export async function sendOrderNotification({
   vendor,
   dvc,
 }) {
-  const { whatsappOrderTemplate, nodeEnv } = getConfig();
+  const { whatsappOrderTemplate, nodeEnv } = getNotificationsConfig();
   const isProd = nodeEnv === "production";
   const orderIdShort = orderId ? String(orderId).slice(-8) : "";
 
@@ -280,7 +324,7 @@ export async function sendOrderNotification({
         }
       } catch (error) {
         console.error(
-          `[Notifications] WhatsApp order message error for ${phone}: ${error.message}`,
+          `[Notifications] WhatsApp order message error for ${phone}: ${providerErrorMessage(error)}`,
         );
       }
     }
@@ -306,7 +350,7 @@ export async function sendOrderNotification({
         }
       } catch (error) {
         console.error(
-          `[Notifications] Email order message error for ${to}: ${error.message}`,
+          `[Notifications] Email order message error for ${to}: ${providerErrorMessage(error)}`,
         );
       }
     }
