@@ -82,6 +82,28 @@ describe("memberAuthController", () => {
     expect(res.status).toHaveBeenCalledWith(201);
   });
 
+  it("surfaces the business rejection reason from the service", async () => {
+    createMemberAccountService.mockResolvedValue({
+      success: false,
+      error: "User is already a MEMBER, cannot create new account",
+    });
+
+    const req = {
+      body: { password: "securePass123", name: "Ada" },
+      user: { userId: "user_2" },
+    };
+    const res = createRes();
+
+    await memberAuthController.createAccount(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalledWith({
+      success: false,
+      message: "User is already a MEMBER, cannot create new account",
+      error: "User is already a MEMBER, cannot create new account",
+    });
+  });
+
   it("rejects invalid phone format for member login", async () => {
     const req = {
       body: { phone: "123", password: "securePass123" },

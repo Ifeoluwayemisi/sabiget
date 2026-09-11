@@ -12,7 +12,7 @@ const customerLinks = [
 ];
 
 const vendorLinks = [
-  { label: "Become a vendor", href: "/vendor-dashboard" },
+  { label: "Become a vendor", href: "/vendor/dashboard" },
 ];
 
 export default function Footer() {

@@ -49,7 +49,7 @@ http://localhost:5000/api/v1
 - **VENDOR**: Separate onboarding portal. Login/signup is email + password (NOT 2FA — see vendor flow below).
 - **ADMIN**: Admin-only operations, backend-enforced.
 
-The frontend auth modal presents *intent* options — **Sign in**, **Create account**, or **Continue as guest** — never the internal GUEST/MEMBER role names. Vendor onboarding is separate at `/vendor-dashboard`.
+The frontend auth modal presents *intent* options — **Sign in**, **Create account**, or **Continue as guest** — never the internal GUEST/MEMBER role names. Vendor access is separate at `/vendor/dashboard`, and brand-new vendors continue into a guided store-setup flow at `/vendor/onboarding`.
 
 ---
 
@@ -72,9 +72,9 @@ The frontend auth modal presents *intent* options — **Sign in**, **Create acco
 The AuthModal drives a step machine: `choose → phone → otp → (details)`.
 
 - **Sign in** / **Continue as guest**: phone → send OTP → verify → session stored.
-- **Create account**: phone → send OTP → verify (temporary GUEST session) → collect name/email/password → `POST /auth/create-account` converts to MEMBER.
+- **Create account**: phone **+ email** → send OTP → verify (temporary GUEST session) → collect name/password → `POST /auth/create-account` converts to MEMBER. The email is collected on the phone step and sent with the OTP request so the WhatsApp → email delivery fallback can still reach the user when WhatsApp is unavailable.
 - The OTP screen exposes **Change phone number** (returns to the phone step, clears the OTP and resets the sent-phone so resending targets the new number) and **Resend code**. Verification is bound to the phone the code was issued for.
-- Vendor onboarding is NOT inside this modal — an entry link routes to `/vendor-dashboard`.
+- Vendor access is NOT inside this modal — an entry link routes to `/vendor/dashboard`.
 
 #### 1. **Send OTP** (No auth required)
 
@@ -193,9 +193,24 @@ Response: {
 
 ---
 
-### VENDOR FLOW (Separate onboarding at `/vendor-dashboard`)
+### VENDOR FLOW (Routes: `/vendor/dashboard` and `/vendor/onboarding`)
 
-Vendor authentication is email + password (no 2FA endpoint currently exists in the backend). The `/vendor-dashboard` page renders a Sign in / Create account panel when no vendor token is present; a successful reply stores `accessToken`/`refreshToken` and loads the dashboard.
+Vendor authentication is email + password (no 2FA endpoint currently exists in the backend). The `/vendor/dashboard` page renders a Sign in / Create account panel when no vendor token is present; a successful reply stores `accessToken`/`refreshToken` and loads the dashboard.
+
+After authentication the dashboard and onboarding routes decide where the vendor belongs **from backend state only** (`GET /vendors/me`), never localStorage:
+
+- Profile setup incomplete (`!setupComplete`) → dashboard **redirects** to `/vendor/onboarding`.
+- Setup complete but unverified (`pending`) → dashboard with a "Pending admin verification" banner. Verification is an **admin** step, never a vendor step.
+- Setup complete and verified (`ready`) → full dashboard.
+
+**Setup steps** (progress lives server-side, in `GET /vendors/me`; "what counts as blocked" rule is centralized in `frontend/src/lib/vendorSetup.ts`):
+
+1. **Business information** — `PATCH /vendors/profile` (name, description; phone/email/address optional).
+2. **Store location** — `PATCH /vendors/profile` with `latitude` + `longitude` together (LGA computed server-side); `serviceRadius` optional (1–50 km).
+3. **Payment account** — Paystack subaccount setup (`POST /vendors/setup-paystack`, then `GET /vendors/me` reflects `paystackSubcode`).
+4. **Menu** — at least one product (product CRUD endpoints).
+
+The vendor dashboard is organized into sections with a **desktop sidebar** and a **mobile bottom navigation**: Home (overview), Orders, Menu, Payments, Store. Orders lists `GET /orders` (vendor-scoped), accept/reject/prepare/out-for-delivery/DVC/complete actions, and reconciles on Socket.IO `order:*` events.
 
 #### 1. **Vendor Signup** (New business owner)
 

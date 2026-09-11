@@ -49,7 +49,11 @@ export async function createAccount(req, res) {
     });
 
     if (!result.success) {
-      return res.status(400).json(result);
+      return res.status(400).json({
+        success: false,
+        message: result.error || "Failed to create account",
+        error: result.error,
+      });
     }
 
     return res.status(201).json({

@@ -2,30 +2,42 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import {
+  ArrowLeft,
   CheckCircle2,
   Clock3,
+  LayoutDashboard,
+  LogOut,
   ShoppingBag,
   Store,
+  UtensilsCrossed,
   Wallet,
   Mail,
   Lock,
   Phone,
-  ArrowLeft,
+  ChevronRight,
 } from "lucide-react";
-import type { Socket } from "socket.io-client";
 import {
   apiRequest,
   getAccessToken,
   storeAuthPayload,
   subscribeToAuth,
+  logout,
 } from "@/lib/api/client";
+import { closeSocket } from "@/lib/socket";
+import { fetchVendorProfile, type VendorProfile } from "@/lib/api/vendorProfile";
+import { getVendorSetupState } from "@/lib/vendorSetup";
+import { getOrderStatusMeta } from "@/lib/orderStatus";
+import VendorOrdersSection from "@/features/vendor/VendorOrdersSection";
+import VendorMenuSection from "@/features/vendor/VendorMenuSection";
+import PaymentSetupSection from "@/features/vendor/PaymentSetupSection";
+import StoreStatusBanner from "@/features/vendor/StoreStatusBanner";
 import {
-  getSocket,
-  joinVendorRoom,
-  SOCKET_EVENTS,
-} from "@/lib/socket";
+  BusinessInfoForm,
+  StoreLocationForm,
+} from "@/features/vendor/StoreForms";
 
 interface DashboardStats {
   totalOrders: number;
@@ -67,31 +79,37 @@ interface VendorDashboardData {
   recentOrders: RecentOrder[];
 }
 
-const statusLabel: Record<string, string> = {
-  PENDING: "Pending",
-  ACCEPTED: "Accepted",
-  PREPARING: "Preparing",
-  OUT_FOR_DELIVERY: "Out for delivery",
-  DELIVERED: "Delivered",
-  COMPLETED: "Completed",
-  CANCELLED_CUSTOMER: "Cancelled by customer",
-  CANCELLED_VENDOR: "Cancelled by vendor",
-  CANCELLED_AUTO_KILL: "Auto-cancelled",
-  REFUNDED: "Refunded",
-};
+type DashboardTab = "overview" | "orders" | "menu" | "payments" | "store";
+
+const NAV_ITEMS: Array<{
+  key: DashboardTab;
+  label: string;
+  icon: typeof LayoutDashboard;
+}> = [
+  { key: "overview", label: "Home", icon: LayoutDashboard },
+  { key: "orders", label: "Orders", icon: ShoppingBag },
+  { key: "menu", label: "Menu", icon: UtensilsCrossed },
+  { key: "payments", label: "Payments", icon: Wallet },
+  { key: "store", label: "Store", icon: Store },
+];
 
 export default function VendorDashboardPage() {
-  // Start loading only when a session already exists; otherwise the auth gate
-  // renders immediately on first paint instead of flashing a spinner.
-  const [loading, setLoading] = useState(() => getAccessToken() !== null);
+  const router = useRouter();
+
+  // The session is deliberately NOT read during the initial render: SSR has no
+  // localStorage, so seeding state from it would paint the sign-in gate on the
+  // server while an authenticated client paints the loader — a hydration
+  // mismatch. Both sides render the neutral loading screen first; the session
+  // is resolved after mount (see resolveSession below).
+  const [loading, setLoading] = useState(true);
   const [dashboard, setDashboard] = useState<VendorDashboardData | null>(null);
+  const [profile, setProfile] = useState<VendorProfile | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [submittingId, setSubmittingId] = useState<string | null>(null);
-  const [dvcMap, setDvcMap] = useState<Record<string, string>>({});
+  const [activeTab, setActiveTab] = useState<DashboardTab>("overview");
 
   // Track auth via the shared client so logging in/out (anywhere) rerenders
   // the gate immediately, rather than reading localStorage once on mount.
-  const [token, setToken] = useState<string | null>(() => getAccessToken());
+  const [token, setToken] = useState<string | null>(null);
   const [authMode, setAuthMode] = useState<"signin" | "signup">("signin");
   const [authForm, setAuthForm] = useState({
     email: "",
@@ -103,6 +121,20 @@ export default function VendorDashboardPage() {
   const [authSubmitting, setAuthSubmitting] = useState(false);
 
   useEffect(() => subscribeToAuth(() => setToken(getAccessToken())), []);
+
+  // Post-hydration session resolution: a real token starts the dashboard load,
+  // while a missing one lifts the neutral loader and reveals the sign-in gate.
+  useEffect(() => {
+    const resolveSession = async () => {
+      const next = getAccessToken();
+      if (next) {
+        setToken(next);
+      } else {
+        setLoading(false);
+      }
+    };
+    void resolveSession();
+  }, []);
 
   const handleVendorAuth = async () => {
     const isSignup = authMode === "signup";
@@ -179,120 +211,98 @@ export default function VendorDashboardPage() {
       return;
     }
 
+    setLoading(true);
     try {
-      setLoading(true);
-      const response = await apiRequest("/vendors/dashboard/stats");
+      const [statsResponse, vendorProfile] = await Promise.all([
+        apiRequest("/vendors/dashboard/stats"),
+        fetchVendorProfile(),
+      ]);
 
-      const data = await response.json();
+      const data = await statsResponse.json();
 
-      if (!response.ok) {
+      if (!statsResponse.ok) {
         throw new Error(data.error || "Unable to load vendor dashboard");
       }
 
+      // Route incomplete vendors to onboarding BEFORE any dashboard content is
+      // rendered, using backend state (GET /vendors/me). `dashboard` stays
+      // null and `loading` stays true, so the neutral loading screen covers
+      // the redirect and a fresh signup can never flash the dashboard shell.
+      if (!getVendorSetupState(vendorProfile).setupComplete) {
+        setProfile(vendorProfile);
+        router.replace("/vendor/onboarding");
+        return;
+      }
+
       setDashboard(data);
+      setProfile(vendorProfile);
       setError(null);
+      setLoading(false);
     } catch (loadError) {
       setError(
         loadError instanceof Error
           ? loadError.message
           : "Unable to load vendor dashboard.",
       );
-    } finally {
       setLoading(false);
     }
-  }, [token]);
+  }, [token, router]);
 
   useEffect(() => {
+    if (!token) return;
     const load = async () => {
       await fetchDashboard();
     };
     void load();
-  }, [fetchDashboard]);
+  }, [token, fetchDashboard]);
 
-  const vendorId = dashboard?.vendor.id;
-
-  // Realtime layer: order events never mutate dashboard state directly —
-  // they trigger an authoritative REST reconciliation via fetchDashboard.
-  useEffect(() => {
-    if (!token || !vendorId) return;
-
-    let cancelled = false;
-    let socket: Socket | null = null;
-
-    const onOrderEvent = () => void fetchDashboard();
-    const onConnect = () => void fetchDashboard();
-
-    const wireRealtime = async () => {
-      const pendingSocket = getSocket();
-      if (!pendingSocket || cancelled) return;
-
-      socket = await pendingSocket;
-      if (cancelled) return;
-
-      // Room membership is ownership-checked server side; a failure here
-      // simply leaves the dashboard on its normal REST behavior.
-      if (!(await joinVendorRoom(socket, vendorId))) return;
-
-      socket.on(SOCKET_EVENTS.ORDER_NEW, onOrderEvent);
-      socket.on(SOCKET_EVENTS.ORDER_STATUS_UPDATED, onOrderEvent);
-      socket.on("connect", onConnect);
-    };
-
-    void wireRealtime();
-
-    return () => {
-      cancelled = true;
-      if (socket) {
-        socket.off(SOCKET_EVENTS.ORDER_NEW, onOrderEvent);
-        socket.off(SOCKET_EVENTS.ORDER_STATUS_UPDATED, onOrderEvent);
-        socket.off("connect", onConnect);
-      }
-    };
-  }, [token, vendorId, fetchDashboard]);
-
-  const updateOrderStatus = async (
-    orderId: string,
-    action: string,
-    extraBody?: Record<string, string>,
-  ) => {
-    if (!token) return;
-
-    setSubmittingId(orderId);
-
+  const reloadProfile = useCallback(async () => {
     try {
-      const response = await apiRequest(`/orders/${orderId}/${action}`, {
-        method: "POST",
-        body: extraBody ? JSON.stringify(extraBody) : undefined,
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || "Action failed");
-      }
-
-      await fetchDashboard();
-    } catch (actionError) {
-      console.error(actionError);
-      setError(
-        actionError instanceof Error
-          ? actionError.message
-          : "Could not update order status.",
-      );
-    } finally {
-      setSubmittingId(null);
+      const updated = await fetchVendorProfile();
+      setProfile(updated);
+    } catch {
+      // Non-critical refresh; current profile stays visible on failure.
     }
+  }, []);
+
+  const handlePaymentSetupComplete = async () => {
+    await reloadProfile();
+    await fetchDashboard();
   };
 
-  const handleRejectOrder = async (orderId: string) => {
-    // Destructive + financial (triggers a refund): require explicit intent.
-    const confirmed = window.confirm(
-      "Reject this order? The customer's payment will be refunded.",
-    );
-    if (!confirmed) return;
-
-    await updateOrderStatus(orderId, "reject");
+  const handleLogout = async () => {
+    await logout();
+    closeSocket();
   };
+
+  const statsCard = dashboard
+    ? [
+        {
+          title: "Total orders",
+          value: dashboard.orders.totalOrders,
+          icon: ShoppingBag,
+          accent: "bg-orange-500",
+        },
+        {
+          title: "Active orders",
+          value: dashboard.orders.activeOrders,
+          icon: Clock3,
+          accent: "bg-amber-500",
+        },
+        {
+          title: "Completed",
+          value: dashboard.orders.completedOrders,
+          icon: CheckCircle2,
+          accent: "bg-emerald-500",
+        },
+        {
+          title: "Revenue",
+          value: `₦${dashboard.earnings.totalRevenue.toLocaleString()}`,
+          icon: Wallet,
+          accent: "bg-violet-500",
+        },
+      ]
+    : [];
 
   if (!token && !loading) {
     const isSignup = authMode === "signup";
@@ -314,7 +324,7 @@ export default function VendorDashboardPage() {
             Vendor dashboard
           </h1>
           <p className="mt-1 text-sm text-gray-600">
-            Sign in to view and manage your incoming orders. New businesses can
+            Sign in to manage your store and incoming orders. New businesses can
             create an account below.
           </p>
 
@@ -427,9 +437,7 @@ export default function VendorDashboardPage() {
                 <Lock className="h-4 w-4 text-gray-400" />
                 <input
                   type="password"
-                  autoComplete={
-                    isSignup ? "new-password" : "current-password"
-                  }
+                  autoComplete={isSignup ? "new-password" : "current-password"}
                   value={authForm.password}
                   onChange={(event) =>
                     setAuthForm((prev) => ({
@@ -463,13 +471,17 @@ export default function VendorDashboardPage() {
                   ? "Create vendor account"
                   : "Sign in to dashboard"}
             </button>
+
+            <p className="text-center text-xs text-gray-400">
+              New vendors are taken straight into a guided store setup.
+            </p>
           </div>
         </div>
       </div>
     );
   }
 
-  if (loading) {
+  if (loading && !dashboard) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-gray-50">
         <div className="text-lg font-medium text-gray-600">
@@ -479,12 +491,19 @@ export default function VendorDashboardPage() {
     );
   }
 
-  if (error) {
+  if (error && !dashboard) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4">
         <div className="max-w-lg rounded-2xl border border-red-200 bg-red-50 p-6 text-red-700">
           <h2 className="text-xl font-bold">Dashboard unavailable</h2>
           <p className="mt-2">{error}</p>
+          <button
+            type="button"
+            onClick={() => void fetchDashboard()}
+            className="mt-4 rounded-xl bg-red-600 px-4 py-2.5 text-sm font-bold text-white"
+          >
+            Try again
+          </button>
         </div>
       </div>
     );
@@ -494,287 +513,285 @@ export default function VendorDashboardPage() {
     return null;
   }
 
-  const statsCard = [
-    {
-      title: "Total orders",
-      value: dashboard.orders.totalOrders,
-      icon: ShoppingBag,
-      accent: "bg-orange-500",
-    },
-    {
-      title: "Active orders",
-      value: dashboard.orders.activeOrders,
-      icon: Clock3,
-      accent: "bg-amber-500",
-    },
-    {
-      title: "Completed",
-      value: dashboard.orders.completedOrders,
-      icon: CheckCircle2,
-      accent: "bg-emerald-500",
-    },
-    {
-      title: "Revenue",
-      value: `₦${dashboard.earnings.totalRevenue.toLocaleString()}`,
-      icon: Wallet,
-      accent: "bg-violet-500",
-    },
-  ];
-
-  return (
-    <div className="min-h-screen bg-gray-50 px-4 py-8">
-      <div className="mx-auto max-w-7xl">
-        <div className="mb-8 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-orange-500">
-              Vendor dashboard
-            </p>
-            <h1 className="mt-2 text-3xl font-black text-gray-900">
-              {dashboard.vendor.name}
-            </h1>
+  const renderContent = () => {
+    switch (activeTab) {
+      case "orders":
+        return <VendorOrdersSection />;
+      case "menu":
+        return <VendorMenuSection />;
+      case "payments":
+        return (
+          <PaymentSetupSection
+            configured={profile?.paystackConfigured ?? false}
+            onSetupComplete={handlePaymentSetupComplete}
+          />
+        );
+      case "store":
+        return (
+          <div className="space-y-6">
+            {profile && <StoreStatusBanner profile={profile} />}
+            {profile && (
+              <BusinessInfoForm
+                key={`business-${profile.name}-${String(profile.description ?? "")}`}
+                profile={profile}
+                onSaved={reloadProfile}
+              />
+            )}
+            {profile && (
+              <StoreLocationForm
+                key={`location-${profile.latitude ?? "none"}-${profile.longitude ?? "none"}`}
+                profile={profile}
+                onSaved={reloadProfile}
+              />
+            )}
+            <div className="flex justify-center border-t border-gray-100 pt-6">
+              <button
+                type="button"
+                onClick={() => void handleLogout()}
+                className="inline-flex min-h-[44px] items-center gap-2 rounded-xl border border-gray-300 px-5 py-2.5 text-sm font-semibold text-gray-700"
+              >
+                <LogOut className="h-4 w-4" />
+                Log out of dashboard
+              </button>
+            </div>
           </div>
+        );
+      case "overview":
+      default: {
+        const recentOrders = dashboard.recentOrders.slice(0, 5);
+        return (
+          <div className="space-y-6">
+            {profile && <StoreStatusBanner profile={profile} />}
 
-          <div className="flex items-center gap-3">
-            <span
-              className={`rounded-full px-3 py-1 text-xs font-semibold ${dashboard.vendor.isActive ? "bg-emerald-100 text-emerald-700" : "bg-gray-200 text-gray-700"}`}
-            >
-              {dashboard.vendor.isActive ? "Active" : "Inactive"}
-            </span>
-            <span
-              className={`rounded-full px-3 py-1 text-xs font-semibold ${dashboard.vendor.isVerified ? "bg-blue-100 text-blue-700" : "bg-amber-100 text-amber-700"}`}
-            >
-              {dashboard.vendor.isVerified
-                ? "Verified"
-                : "Pending verification"}
-            </span>
-          </div>
-        </div>
-
-        <div className="mb-8 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          {statsCard.map(({ title, value, icon: Icon, accent }) => (
-            <motion.div
-              key={title}
-              initial={{ opacity: 0, y: 12 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm"
-            >
-              <div className="flex items-start justify-between">
+            <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+              <div className="flex flex-col justify-between gap-3 md:flex-row md:items-center">
                 <div>
-                  <p className="text-sm text-gray-500">{title}</p>
-                  <h3 className="mt-3 text-2xl font-black text-gray-900">
-                    {value}
-                  </h3>
+                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-orange-500">
+                    Vendor dashboard
+                  </p>
+                  <h1 className="mt-1 text-2xl font-black text-gray-900">
+                    {dashboard.vendor.name}
+                  </h1>
                 </div>
-                <div
-                  className={`${accent} flex h-11 w-11 items-center justify-center rounded-xl text-white`}
-                >
-                  <Icon className="h-5 w-5" />
+                <div className="flex items-center gap-3">
+                  <span
+                    className={`rounded-full px-3 py-1 text-xs font-semibold ${dashboard.vendor.isActive ? "bg-emerald-100 text-emerald-700" : "bg-gray-200 text-gray-700"}`}
+                  >
+                    {dashboard.vendor.isActive ? "Active" : "Inactive"}
+                  </span>
+                  <span
+                    className={`rounded-full px-3 py-1 text-xs font-semibold ${dashboard.vendor.isVerified ? "bg-blue-100 text-blue-700" : "bg-amber-100 text-amber-700"}`}
+                  >
+                    {dashboard.vendor.isVerified
+                      ? "Verified"
+                      : "Pending verification"}
+                  </span>
                 </div>
               </div>
-            </motion.div>
-          ))}
-        </div>
-
-        <div className="grid gap-6 xl:grid-cols-[1.8fr_1fr]">
-          <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-            <div className="mb-5 flex items-center justify-between">
-              <h2 className="text-xl font-bold text-gray-900">Recent orders</h2>
-              <span className="text-sm text-gray-500">
-                {dashboard.recentOrders.length} items
-              </span>
             </div>
 
-            <div className="space-y-4">
-              {dashboard.recentOrders.length === 0 ? (
-                <div className="rounded-xl bg-gray-50 p-4 text-sm text-gray-500">
-                  No orders yet.
-                </div>
-              ) : (
-                dashboard.recentOrders.map((order) => (
-                  <div
-                    key={order.id}
-                    className="rounded-2xl border border-gray-200 bg-gray-50 p-4"
-                  >
-                    <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                      <div>
-                        <p className="text-sm font-semibold text-gray-900">
-                          Order {order.id.slice(0, 8)}
-                        </p>
-                        <p className="text-sm text-gray-500">
-                          {order.user?.name || "Guest customer"} •{" "}
-                          {order.user?.phone || "No phone"}
-                        </p>
-                      </div>
-
-                      <div className="flex items-center gap-2">
-                        <span className="rounded-full bg-orange-100 px-2.5 py-1 text-xs font-semibold text-orange-700">
-                          {statusLabel[order.status] || order.status}
-                        </span>
-                        <span className="text-sm font-bold text-gray-900">
-                          ₦{Number(order.totalAmount || 0).toLocaleString()}
-                        </span>
-                      </div>
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+              {statsCard.map(({ title, value, icon: Icon, accent }) => (
+                <motion.div
+                  key={title}
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm"
+                >
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <p className="text-sm text-gray-500">{title}</p>
+                      <h3 className="mt-3 text-2xl font-black text-gray-900">
+                        {value}
+                      </h3>
                     </div>
-
-                    <div className="mt-4 flex flex-wrap gap-2">
-                      {order.status === "PENDING" && (
-                        <>
-                          <button
-                            onClick={() => updateOrderStatus(order.id, "accept")}
-                            disabled={submittingId === order.id}
-                            className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white disabled:bg-emerald-300"
-                          >
-                            {submittingId === order.id
-                              ? "Processing..."
-                              : "Accept order"}
-                          </button>
-                          <button
-                            onClick={() => handleRejectOrder(order.id)}
-                            disabled={submittingId === order.id}
-                            className="rounded-lg bg-red-600 px-3 py-2 text-xs font-semibold text-white disabled:bg-red-300"
-                          >
-                            Reject order
-                          </button>
-                        </>
-                      )}
-
-                      {order.status === "ACCEPTED" && (
-                        <>
-                          <button
-                            onClick={() =>
-                              updateOrderStatus(order.id, "preparing")
-                            }
-                            disabled={submittingId === order.id}
-                            className="rounded-lg bg-amber-500 px-3 py-2 text-xs font-semibold text-white disabled:bg-amber-300"
-                          >
-                            Mark as preparing
-                          </button>
-                        </>
-                      )}
-
-                      {order.status === "PREPARING" && (
-                        <>
-                          <button
-                            onClick={() =>
-                              updateOrderStatus(order.id, "out-for-delivery")
-                            }
-                            disabled={submittingId === order.id}
-                            className="rounded-lg bg-amber-500 px-3 py-2 text-xs font-semibold text-white disabled:bg-amber-300"
-                          >
-                            Mark out for delivery
-                          </button>
-                        </>
-                      )}
-
-                      {order.status === "OUT_FOR_DELIVERY" && (
-                        <div className="flex flex-wrap items-center gap-2">
-                          <input
-                            type="text"
-                            value={dvcMap[order.id] || ""}
-                            onChange={(event) =>
-                              setDvcMap((prev) => ({
-                                ...prev,
-                                [order.id]: event.target.value,
-                              }))
-                            }
-                            placeholder="Enter DVC code"
-                            className="min-w-[140px] rounded-lg border border-gray-300 bg-white px-2 py-2 text-xs text-gray-700 outline-none focus:border-orange-500"
-                          />
-                          <button
-                            onClick={() =>
-                              updateOrderStatus(order.id, "verify-dvc", {
-                                dvcCode: dvcMap[order.id] || "",
-                              })
-                            }
-                            disabled={submittingId === order.id}
-                            className="rounded-lg bg-violet-600 px-3 py-2 text-xs font-semibold text-white disabled:bg-violet-300"
-                          >
-                            Verify delivery code
-                          </button>
-                        </div>
-                      )}
-
-                      {order.status === "DELIVERED" && (
-                        <button
-                          onClick={() =>
-                            updateOrderStatus(order.id, "complete")
-                          }
-                          disabled={submittingId === order.id}
-                          className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white disabled:bg-blue-300"
-                        >
-                          Complete order
-                        </button>
-                      )}
+                    <div
+                      className={`${accent} flex h-11 w-11 items-center justify-center rounded-xl text-white`}
+                    >
+                      <Icon className="h-5 w-5" />
                     </div>
                   </div>
-                ))
+                </motion.div>
+              ))}
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-3">
+              {(
+                [
+                  { key: "orders", label: "View orders", icon: ShoppingBag },
+                  { key: "menu", label: "Manage menu", icon: UtensilsCrossed },
+                  { key: "payments", label: "Payments", icon: Wallet },
+                ] as Array<{
+                  key: DashboardTab;
+                  label: string;
+                  icon: typeof ShoppingBag;
+                }>
+              ).map(({ key, label, icon: Icon }) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setActiveTab(key)}
+                  className="flex items-center justify-between gap-2 rounded-2xl border border-gray-200 bg-white p-4 text-left shadow-sm transition-colors hover:border-orange-200"
+                >
+                  <span className="flex items-center gap-2.5 text-sm font-semibold text-gray-700">
+                    <Icon className="h-4 w-4 text-orange-500" />
+                    {label}
+                  </span>
+                  <ChevronRight className="h-4 w-4 text-gray-400" />
+                </button>
+              ))}
+            </div>
+
+            <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+              <div className="mb-4 flex items-center justify-between">
+                <h2 className="text-xl font-bold text-gray-900">
+                  Recent orders
+                </h2>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("orders")}
+                  className="text-sm font-semibold text-orange-500"
+                >
+                  View all
+                </button>
+              </div>
+
+              {recentOrders.length === 0 ? (
+                <div className="rounded-xl bg-gray-50 p-4 text-sm text-gray-500">
+                  No orders yet — when customers place orders they&apos;ll show
+                  up here.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {recentOrders.map((order) => {
+                    const meta = getOrderStatusMeta(order.status);
+                    return (
+                      <div
+                        key={order.id}
+                        className="rounded-xl border border-gray-200 bg-gray-50 p-4"
+                      >
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                          <div>
+                            <p className="text-sm font-semibold text-gray-900">
+                              Order {order.id.slice(0, 8)}
+                            </p>
+                            <p className="text-xs text-gray-500">
+                              {order.user?.name || "Guest customer"}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span
+                              className={`rounded-full px-2.5 py-1 text-xs font-semibold ${meta.tone}`}
+                            >
+                              {meta.label}
+                            </span>
+                            <span className="text-sm font-bold text-gray-900">
+                              ₦
+                              {Number(order.totalAmount || 0).toLocaleString()}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               )}
-            </div>
-          </section>
+            </section>
+          </div>
+        );
+      }
+    }
+  };
 
-          <aside className="space-y-6">
-            <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-              <h3 className="mb-4 text-lg font-bold text-gray-900">
-                Operational summary
-              </h3>
-              <div className="space-y-4 text-sm text-gray-600">
-                <div className="flex items-center justify-between">
-                  <span>Pending</span>
-                  <span className="font-bold text-gray-900">
-                    {dashboard.orders.pendingOrders}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span>Refunded</span>
-                  <span className="font-bold text-gray-900">
-                    {dashboard.orders.refundedOrders}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span>Cancelled</span>
-                  <span className="font-bold text-gray-900">
-                    {dashboard.orders.cancelledOrders}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span>Paystack setup</span>
-                  <span
-                    className={`font-bold ${dashboard.vendor.paystackSubcodeConfigured ? "text-emerald-600" : "text-amber-600"}`}
-                  >
-                    {dashboard.vendor.paystackSubcodeConfigured
-                      ? "Ready"
-                      : "Missing"}
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-              <h3 className="mb-4 text-lg font-bold text-gray-900">Earnings</h3>
-              <div className="space-y-4 text-sm text-gray-600">
-                <div className="flex items-center justify-between">
-                  <span>Pending revenue</span>
-                  <span className="font-bold text-gray-900">
-                    ₦{dashboard.earnings.pendingRevenue.toLocaleString()}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span>Completed revenue</span>
-                  <span className="font-bold text-gray-900">
-                    ₦{dashboard.earnings.completedRevenue.toLocaleString()}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span>Refunded</span>
-                  <span className="font-bold text-gray-900">
-                    ₦{dashboard.earnings.refundedAmount.toLocaleString()}
-                  </span>
-                </div>
-              </div>
-            </div>
-          </aside>
+  return (
+    <div className="min-h-screen bg-gray-50">
+      {/* Desktop sidebar */}
+      <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col border-r border-gray-200 bg-white lg:flex">
+        <div className="flex items-center gap-2 border-b border-gray-100 px-6 py-6">
+          <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#ff4500] text-sm font-black text-white">
+            S
+          </span>
+          <div>
+            <p className="text-sm font-extrabold text-gray-900">SabiGet</p>
+            <p className="text-xs text-gray-500">Vendor dashboard</p>
+          </div>
         </div>
+
+        <nav aria-label="Vendor dashboard sections" className="flex-1 p-4">
+          <ul className="space-y-1">
+            {NAV_ITEMS.map(({ key, label, icon: Icon }) => (
+              <li key={key}>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab(key)}
+                  className={`flex min-h-[44px] w-full items-center gap-3 rounded-xl px-4 py-2.5 text-sm font-semibold transition-colors ${
+                    activeTab === key
+                      ? "bg-orange-50 text-orange-500"
+                      : "text-gray-600 hover:bg-gray-50"
+                  }`}
+                >
+                  <Icon className="h-4 w-4" />
+                  {label}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </nav>
+
+        <div className="border-t border-gray-100 p-4">
+          <button
+            type="button"
+            onClick={() => void handleLogout()}
+            className="flex min-h-[44px] w-full items-center gap-3 rounded-xl px-4 py-2.5 text-sm font-semibold text-gray-500 transition-colors hover:bg-gray-50"
+          >
+            <LogOut className="h-4 w-4" />
+            Log out
+          </button>
+        </div>
+      </aside>
+
+      {/* Main content */}
+      <div className="lg:pl-64">
+        <main className="px-4 py-6 pb-28 lg:px-8 lg:pb-12">
+          <div className="mx-auto max-w-5xl">{renderContent()}</div>
+        </main>
       </div>
+
+      {/* Mobile bottom navigation */}
+      <nav
+        aria-label="Vendor dashboard sections"
+        className="fixed inset-x-0 bottom-0 z-30 border-t border-gray-200 bg-white pb-[calc(0.25rem+env(safe-area-inset-bottom))] lg:hidden"
+      >
+        <ul className="flex items-stretch justify-between px-2 pt-1.5">
+          {NAV_ITEMS.map(({ key, label, icon: Icon }) => (
+            <li key={key} className="flex-1">
+              <button
+                type="button"
+                onClick={() => setActiveTab(key)}
+                aria-current={activeTab === key ? "page" : undefined}
+                className={`flex min-h-[52px] w-full flex-col items-center justify-center gap-1 rounded-xl px-1 text-[11px] font-semibold ${
+                  activeTab === key
+                    ? "text-orange-500"
+                    : "text-gray-500"
+                }`}
+              >
+                <Icon className="h-5 w-5" />
+                {label}
+              </button>
+            </li>
+          ))}
+          <li className="flex-1">
+            <button
+              type="button"
+              onClick={() => void handleLogout()}
+              className="flex min-h-[52px] w-full flex-col items-center justify-center gap-1 rounded-xl px-1 text-[11px] font-semibold text-gray-500"
+            >
+              <LogOut className="h-5 w-5" />
+              Log out
+            </button>
+          </li>
+        </ul>
+      </nav>
     </div>
   );
 }

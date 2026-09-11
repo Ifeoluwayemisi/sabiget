@@ -42,7 +42,7 @@ export default function VendorCTA() {
 
             <div className="mt-9 flex justify-center">
               <Link
-                href="/vendor-dashboard"
+                href="/vendor/dashboard"
                 className="inline-flex min-h-[52px] items-center justify-center gap-2 rounded-full bg-[#ff4500] px-7 py-3.5 text-base font-bold text-white shadow-[0_10px_28px_-10px_rgba(255,69,0,0.65)] transition-all duration-200 hover:-translate-y-0.5 hover:bg-[#ff6a00]"
               >
                 Become a SabiGet vendor

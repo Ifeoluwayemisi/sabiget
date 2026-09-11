@@ -5,7 +5,7 @@ import {
   authorize,
   optionalAuth,
 } from "../middleware/auth.js";
-import { createSubAccount } from "../utils/paystack.js";
+import { createSubAccount, resolveAccountNumber } from "../utils/paystack.js";
 import { hashPassword } from "../utils/password.js";
 import { vendorRegistrationLimiter } from "../middleware/rateLimiter.js";
 import {
@@ -164,6 +164,49 @@ router.get("/me", authenticateToken, authorize("VENDOR"), async (req, res) => {
 });
 
 /**
+ * POST /api/vendors/payment-account/verify
+ * Resolve a Nigerian bank account and return the registered account name.
+ * This endpoint ONLY verifies the account — it never creates a Paystack
+ * subaccount and never modifies vendor payment/setup state. Provider failures
+ * are normalized into a safe, human-readable message; no Paystack credentials
+ * or raw provider payloads are exposed.
+ */
+router.post(
+  "/payment-account/verify",
+  authenticateToken,
+  authorize("VENDOR"),
+  async (req, res) => {
+    try {
+      const { bankAccount, bankCode } = req.body;
+
+      if (!bankAccount || !bankCode) {
+        return res.status(400).json({
+          success: false,
+          error: "Bank account and bank code are required",
+        });
+      }
+
+      const resolution = await resolveAccountNumber(bankAccount, bankCode);
+
+      if (!resolution.success) {
+        return res.status(400).json({
+          success: false,
+          error:
+            "We couldn't verify this account. Check the bank and account number and try again.",
+        });
+      }
+
+      return res.json({
+        success: true,
+        accountName: resolution.data.accountName,
+      });
+    } catch (error) {
+      return res.status(500).json({ success: false, error: error.message });
+    }
+  },
+);
+
+/**
  * PATCH /api/vendors/payment-setup
  * Set up Paystack sub-account for vendor
  */
@@ -191,6 +234,16 @@ router.patch(
         });
       }
 
+      // One vendor = one Paystack subaccount. A vendor that already has a
+      // subaccount must never silently receive another one, and an existing
+      // valid subaccount must never be overwritten.
+      if (vendor.paystackSubcode) {
+        return res.status(409).json({
+          success: false,
+          error: "Vendor payment account is already configured",
+        });
+      }
+
       const paystackResponse = await createSubAccount({
         businessName: vendor.name,
         bankCode,
@@ -208,8 +261,13 @@ router.patch(
         });
       }
 
-      const updatedVendor = await global.prisma.Vendor.update({
-        where: { id: vendor.id },
+      // Atomic claim: even if two setup requests pass the pre-check above
+      // concurrently (the Paystack call necessarily happens outside the DB
+      // transaction), only one may persist a subaccount. The loser's Paystack
+      // subaccount becomes an orphan in Paystack, but the vendor row is never
+      // written twice and never overwritten.
+      const claimed = await global.prisma.Vendor.updateMany({
+        where: { id: vendor.id, paystackSubcode: null },
         data: {
           bankAccount,
           bankCode,
@@ -217,12 +275,208 @@ router.patch(
         },
       });
 
+      if (claimed.count === 0) {
+        const existingVendor =
+          (await global.prisma.Vendor.findUnique({ where: { id: vendor.id } })) ||
+          vendor;
+        return res.status(409).json({
+          success: false,
+          error: "Vendor payment account is already configured",
+          vendor: existingVendor,
+        });
+      }
+
+      const updatedVendor =
+        (await global.prisma.Vendor.findUnique({ where: { id: vendor.id } })) ||
+        vendor;
+
       return res.json({
         success: true,
         message: "Payment setup successful",
         vendor: updatedVendor,
       });
     } catch (error) {
+      return res.status(500).json({ success: false, error: error.message });
+    }
+  },
+);
+
+/**
+ * PATCH /api/vendors/profile
+ * Update the authenticated vendor's store business info and/or location.
+ * Business info: name, description, phone, email, address.
+ * Location: latitude + longitude (only valid together), serviceRadius.
+ * Identity always comes from the token — a body `vendorId` is never trusted.
+ * The vendor only becomes discoverable once verified, active, given valid
+ * coordinates within a customer's search radius, and (at checkout) paid.
+ */
+router.patch(
+  "/profile",
+  authenticateToken,
+  authorize("VENDOR"),
+  async (req, res) => {
+    try {
+      const {
+        name,
+        description,
+        phone,
+        email,
+        address,
+        latitude,
+        longitude,
+        serviceRadius,
+      } = req.body;
+      const userId = req.user.userId;
+
+      const vendor = await global.prisma.Vendor.findUnique({ where: { userId } });
+      if (!vendor) {
+        return res.status(404).json({
+          success: false,
+          error: "Vendor profile not found",
+        });
+      }
+
+      const data = {};
+
+      if (name !== undefined) {
+        const trimmedName = typeof name === "string" ? name.trim() : "";
+        if (!trimmedName) {
+          return res.status(400).json({
+            success: false,
+            error: "Business name cannot be empty",
+          });
+        }
+        data.name = trimmedName;
+      }
+
+      if (description !== undefined) {
+        data.description =
+          typeof description === "string" ? description.trim() || null : null;
+      }
+
+      if (phone !== undefined) {
+        const trimmedPhone = typeof phone === "string" ? phone.trim() : "";
+        if (!/^(\+234|0)[789]\d{9}$/.test(trimmedPhone)) {
+          return res.status(400).json({
+            success: false,
+            error: "Invalid Nigerian phone number",
+            example: "+2348123456789",
+          });
+        }
+        data.phone = trimmedPhone;
+      }
+
+      if (email !== undefined) {
+        const trimmedEmail = typeof email === "string" ? email.trim() : "";
+        if (trimmedEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
+          return res.status(400).json({
+            success: false,
+            error: "Invalid email address",
+          });
+        }
+        data.email = trimmedEmail || null;
+      }
+
+      if (address !== undefined) {
+        data.address =
+          typeof address === "string" ? address.trim() || null : null;
+      }
+
+      if (latitude !== undefined || longitude !== undefined) {
+        if (latitude === undefined || longitude === undefined) {
+          return res.status(400).json({
+            success: false,
+            error: "Latitude and longitude must be provided together",
+          });
+        }
+
+        const parsedLatitude = parseFloat(latitude);
+        const parsedLongitude = parseFloat(longitude);
+
+        if (!isValidCoordinates(parsedLatitude, parsedLongitude)) {
+          return res.status(400).json({
+            success: false,
+            error: "Valid coordinates (latitude and longitude) are required",
+          });
+        }
+
+        data.latitude = parsedLatitude;
+        data.longitude = parsedLongitude;
+        data.lga = getLGAFromCoordinates(parsedLatitude, parsedLongitude);
+      }
+
+      if (serviceRadius !== undefined) {
+        const parsedRadius = parseFloat(serviceRadius);
+        if (
+          Number.isNaN(parsedRadius) ||
+          parsedRadius <= 0 ||
+          parsedRadius > 50
+        ) {
+          return res.status(400).json({
+            success: false,
+            error: "Service radius must be greater than 0 and at most 50 km",
+          });
+        }
+        data.serviceRadius = parsedRadius;
+      }
+
+      if (Object.keys(data).length === 0) {
+        return res.status(400).json({
+          success: false,
+          error: "Nothing to update",
+        });
+      }
+
+      if (data.phone || data.email) {
+        const conflictWhere = [];
+        if (data.phone) conflictWhere.push({ phone: data.phone });
+        if (data.email) conflictWhere.push({ email: data.email });
+
+        const conflict = await global.prisma.Vendor.findFirst({
+          where: {
+            NOT: { id: vendor.id },
+            OR: conflictWhere,
+          },
+        });
+
+        if (conflict) {
+          return res.status(400).json({
+            success: false,
+            error: "Another vendor already uses this phone or email",
+          });
+        }
+      }
+
+      const updatedVendor = await global.prisma.Vendor.update({
+        where: { id: vendor.id },
+        data,
+      });
+
+      return res.json({
+        success: true,
+        message: "Store details updated",
+        vendor: {
+          id: updatedVendor.id,
+          name: updatedVendor.name,
+          description: updatedVendor.description,
+          phone: updatedVendor.phone,
+          email: updatedVendor.email,
+          address: updatedVendor.address,
+          latitude: updatedVendor.latitude,
+          longitude: updatedVendor.longitude,
+          lga: updatedVendor.lga,
+          serviceRadius: updatedVendor.serviceRadius,
+          isVerified: updatedVendor.isVerified,
+          isActive: updatedVendor.isActive,
+        },
+      });
+    } catch (error) {
+      if (error.code === "P2002") {
+        return res.status(400).json({
+          success: false,
+          error: "Another vendor already uses this phone or email",
+        });
+      }
       return res.status(500).json({ success: false, error: error.message });
     }
   },

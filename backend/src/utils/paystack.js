@@ -128,6 +128,43 @@ const createSubAccount = async (data) => {
 };
 
 /**
+ * Resolve a Nigerian bank account via Paystack's /bank/resolve endpoint.
+ * Returns the registered account name WITHOUT exposing any Paystack
+ * credentials or raw provider payload to callers beyond the name itself.
+ * @param {string} accountNumber - 10-digit NUBAN account number
+ * @param {string} bankCode - Paystack settlement bank code (e.g. "044")
+ * @returns {Promise<Object>} - { success, data: { accountName } } or { success: false, error }
+ */
+const resolveAccountNumber = async (accountNumber, bankCode) => {
+  try {
+    const response = await paystackApi.get("/bank/resolve", {
+      params: {
+        account_number: accountNumber,
+        bank_code: bankCode,
+      },
+    });
+
+    if (response.data.status && response.data.data?.account_name) {
+      return {
+        success: true,
+        data: { accountName: response.data.data.account_name },
+      };
+    }
+
+    return {
+      success: false,
+      error: response.data.message || "Could not resolve account",
+    };
+  } catch (error) {
+    console.error("Paystack account resolution error:", error.message);
+    return {
+      success: false,
+      error: error.message,
+    };
+  }
+};
+
+/**
  * Split payment between Sabiget and Vendor using Paystack Split
  * @param {Object} data - Split configuration
  * @returns {Promise<Object>} - Split configuration details
@@ -221,6 +258,7 @@ export {
   initializePayment,
   verifyPayment,
   createSubAccount,
+  resolveAccountNumber,
   createPaymentSplit,
   initiateRefund,
   verifyWebhookSignature,

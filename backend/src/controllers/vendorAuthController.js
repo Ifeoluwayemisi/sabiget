@@ -70,11 +70,25 @@ export async function vendorSignup(req, res) {
       });
     }
 
-    // Coordinates fallback to Lagos (Ikeja) if not provided (to avoid Prisma validation crash)
-    const parsedLatitude = latitude !== undefined ? parseFloat(latitude) : 6.6018;
-    const parsedLongitude = longitude !== undefined ? parseFloat(longitude) : 3.3515;
+    // Location is optional at registration. Without coordinates a vendor stays
+    // "incomplete" (and undiscoverable) until they complete the store setup.
+    // No silent defaults: a fabricated Ikeja location must never be stored or
+    // displayed as if the vendor actually chose it.
+    const parsedLatitude = latitude !== undefined ? parseFloat(latitude) : null;
+    const parsedLongitude =
+      longitude !== undefined ? parseFloat(longitude) : null;
 
-    if (!isValidCoordinates(parsedLatitude, parsedLongitude)) {
+    if ((parsedLatitude === null) !== (parsedLongitude === null)) {
+      return res.status(400).json({
+        success: false,
+        error: "Latitude and longitude must be provided together",
+      });
+    }
+
+    if (
+      parsedLatitude !== null &&
+      !isValidCoordinates(parsedLatitude, parsedLongitude)
+    ) {
       return res.status(400).json({
         success: false,
         error: "Valid coordinates (latitude and longitude) are required",
@@ -96,7 +110,10 @@ export async function vendorSignup(req, res) {
     });
 
     // Create Vendor profile mapping to User
-    const lga = getLGAFromCoordinates(parsedLatitude, parsedLongitude);
+    const lga =
+      parsedLatitude !== null && parsedLongitude !== null
+        ? getLGAFromCoordinates(parsedLatitude, parsedLongitude)
+        : null;
     const vendor = await global.prisma.Vendor.create({
       data: {
         userId: user.id,
@@ -106,7 +123,7 @@ export async function vendorSignup(req, res) {
         latitude: parsedLatitude,
         longitude: parsedLongitude,
         lga,
-        description: description || businessCategory || "General",
+        description: description || null,
         isVerified: false,
         isActive: true,
       },

@@ -93,7 +93,8 @@ The frontend currently contains major application areas such as:
 ```text
 /
  /orders
- /vendor-dashboard
+ /vendor/dashboard
+ /vendor/onboarding
 ```
 
 The landing experience includes:
@@ -1695,7 +1696,7 @@ Examples:
 
 ```text
 /orders
-/vendor-dashboard
+/vendor/dashboard
 ```
 
 should not blindly assume a logged-in user.
@@ -2268,7 +2269,7 @@ Examples:
 
 ```text
 /orders
-/vendor-dashboard
+/vendor/dashboard
 ```
 
 Do not assume users always arrive through `/`.

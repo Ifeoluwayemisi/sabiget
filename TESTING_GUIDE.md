@@ -286,7 +286,7 @@ Expected:
 ### E. Vendor dashboard test
 
 1. Sign in as vendor
-2. Open http://localhost:3000/vendor-dashboard
+2. Open http://localhost:3000/vendor/dashboard
 3. Confirm dashboard loads stats
 4. Confirm recent orders appear
 5. Accept an order from the dashboard

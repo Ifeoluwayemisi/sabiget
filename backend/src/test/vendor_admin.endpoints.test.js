@@ -30,6 +30,7 @@ await jest.unstable_mockModule("../middleware/auth.js", () => ({
 
 await jest.unstable_mockModule("../utils/paystack.js", () => ({
   createSubAccount,
+  resolveAccountNumber: jest.fn(),
 }));
 
 await jest.unstable_mockModule("../utils/password.js", () => ({
@@ -62,6 +63,7 @@ describe("vendor and admin endpoint verification", () => {
         findMany: jest.fn(),
         findUnique: jest.fn(),
         update: jest.fn(),
+        updateMany: jest.fn(),
         findFirst: jest.fn(),
         create: jest.fn(),
         count: jest.fn(),
@@ -124,7 +126,7 @@ describe("vendor and admin endpoint verification", () => {
           isVerified: true,
           isActive: true,
           lga: "IKEJA",
-          paystackSubcode: "SUB_1",
+          paystackSubcode: null,
           metrics: {},
           products: [{ id: "p1", isAvailable: true, stockQuantity: 1 }],
         };
@@ -144,6 +146,7 @@ describe("vendor and admin endpoint verification", () => {
       return null;
     });
     prisma.Vendor.update.mockResolvedValue({ id: "vendor_2", paystackSubcode: "SUB_123" });
+    prisma.Vendor.updateMany.mockResolvedValue({ count: 1 });
     prisma.Vendor.findFirst.mockResolvedValue(null);
     prisma.User.findUnique.mockResolvedValue(null);
     prisma.User.create.mockResolvedValue({ id: "user_1" });

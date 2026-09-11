@@ -76,7 +76,7 @@ const INTENT_COPY: Record<
   create: {
     title: "Create your SabiGet account",
     caption:
-      "Verify your phone, then finish setting up your account in a few seconds.",
+      "Add your email and phone number, then we'll verify you with a code.",
   },
   guest: {
     title: "Continue as a guest",
@@ -102,6 +102,9 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
     email: "",
     password: "",
   });
+  // Required Terms & Privacy consent for ACCOUNT CREATION only. Normal sign-in
+  // and the guest flow deliberately never ask for it.
+  const [consentAccepted, setConsentAccepted] = useState(false);
 
   const storeTokens = storeAuthPayload;
 
@@ -123,6 +126,7 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
       setOtpHint(null);
       setFeedback(null);
       setCreateForm({ name: "", email: "", password: "" });
+      setConsentAccepted(false);
     }
   }
 
@@ -173,13 +177,38 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
       return;
     }
 
+    // Create-account notifications prefer WhatsApp and fall back to email, so
+    // the email must exist BEFORE the code is requested for the fallback to be
+    // able to reach the user when WhatsApp delivery fails.
+    if (
+      intent === "create" &&
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(createForm.email.trim())
+    ) {
+      setFeedback({ type: "error", text: "Enter a valid email address." });
+      return;
+    }
+
+    // Account creation cannot proceed until the user consents to the Terms and
+    // Privacy Policy. This is creation-only; sign-in OTP never asks for it.
+    if (intent === "create" && !consentAccepted) {
+      setFeedback({
+        type: "error",
+        text: "Please accept SabiGet's Terms and Privacy Policy to continue.",
+      });
+      return;
+    }
+
     setLoading(true);
     setFeedback(null);
 
     try {
       const data = await requestOtp(
         phone,
-        intent === "guest" ? guestEmail : undefined,
+        intent === "guest"
+          ? guestEmail
+          : intent === "create"
+            ? createForm.email.trim()
+            : undefined,
       );
       setOtp("");
       setOtpSentFor(phone);
@@ -210,7 +239,11 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
     try {
       const data = await requestOtp(
         otpSentFor,
-        intent === "guest" ? guestEmail : undefined,
+        intent === "guest"
+          ? guestEmail
+          : intent === "create"
+            ? createForm.email.trim()
+            : undefined,
       );
       setOtpHint(data.hint || data.message || otpHint);
       setFeedback({
@@ -256,8 +289,15 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
       const data = await response.json();
 
       if (!response.ok) {
+        // 4xx responses carry the rejection reason in `error`; 5xx carry only
+        // a safe wrapper in `message`. Surface the precise reason on 4xx.
+        const detail = String(
+          response.status >= 500
+            ? data.message
+            : data.error || data.message || "",
+        ).trim();
         const error = new Error(
-          data.message || "OTP verification failed",
+          detail || "OTP verification failed",
         ) as Error & { attemptsRemaining?: number };
         if (typeof data.attemptsRemaining === "number") {
           error.attemptsRemaining = data.attemptsRemaining;
@@ -324,7 +364,15 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.message || "Failed to create account");
+        // Business rejections (4xx) carry the reason in `error`; 5xx carry only
+        // a safe wrapper in `message`. Prefer the precise reason on 4xx so the
+        // "already a member" rejection can route the user back to Sign in.
+        const detail = String(
+          response.status >= 500
+            ? data.message
+            : data.error || data.message || "",
+        ).trim();
+        throw new Error(detail || "Failed to create account");
       }
 
       storeTokens(data);
@@ -370,6 +418,82 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
       </label>
 
       <AnimatePresence initial={false}>
+        {intent === "create" && (
+          <motion.label
+            key="create-email-field"
+            variants={panelVariants}
+            initial="hidden"
+            animate="visible"
+            exit="exit"
+            className="block"
+          >
+            <span className="mb-2 block text-sm font-medium text-gray-700">
+              Email address
+            </span>
+            <div className="flex items-center gap-3 rounded-xl border border-gray-300 px-3 py-3 focus-within:border-orange-500">
+              <Mail className="h-4 w-4 text-gray-400" />
+              <input
+                type="email"
+                autoComplete="email"
+                value={createForm.email}
+                onChange={(event) =>
+                  setCreateForm((prev) => ({
+                    ...prev,
+                    email: event.target.value.trim(),
+                  }))
+                }
+                className="w-full border-0 bg-transparent text-sm outline-none"
+                placeholder="you@email.com"
+              />
+            </div>
+            <span className="mt-1 block text-xs text-gray-400">
+              Your account will use this email. Also used to deliver your
+              verification code if WhatsApp is unavailable.
+            </span>
+          </motion.label>
+        )}
+
+        {intent === "create" && (
+          <motion.label
+            key="create-consent"
+            variants={panelVariants}
+            initial="hidden"
+            animate="visible"
+            exit="exit"
+            className="flex items-start gap-3 rounded-xl border border-gray-300 bg-gray-50 px-3 py-3"
+          >
+            <input
+              type="checkbox"
+              checked={consentAccepted}
+              onChange={(event) => setConsentAccepted(event.target.checked)}
+              aria-required="true"
+              required
+              className="mt-0.5 h-5 w-5 shrink-0 rounded border-gray-300 text-orange-500 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2"
+            />
+            <span className="text-xs leading-relaxed text-gray-600">
+              I agree to SabiGet&apos;s{" "}
+              <Link
+                href="/terms"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-semibold text-orange-500 hover:underline"
+              >
+                Terms &amp; Conditions
+              </Link>{" "}
+              and{" "}
+              <Link
+                href="/privacy"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-semibold text-orange-500 hover:underline"
+              >
+                Privacy Policy
+              </Link>
+              .
+            </span>
+          </motion.label>
+        )}
+
         {intent === "guest" && (
           <motion.label
             key="guest-email-field"
@@ -678,7 +802,7 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
                   <p className="pt-2 text-center text-sm text-gray-500">
                     Run a restaurant?{" "}
                     <Link
-                      href="/vendor-dashboard"
+                      href="/vendor/dashboard"
                       onClick={onClose}
                       className="font-semibold text-orange-500 hover:underline"
                     >
