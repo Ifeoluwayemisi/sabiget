@@ -170,6 +170,29 @@ describe("auth endpoint verification", () => {
     });
   });
 
+  it("surfaces the business rejection reason when member upgrade fails", async () => {
+    createMemberAccountService.mockResolvedValue({
+      success: false,
+      error: "User is already a MEMBER, cannot create new account",
+    });
+
+    const response = await server.request("/create-account", {
+      method: "POST",
+      body: JSON.stringify({
+        password: "securePass123",
+        name: "Ada",
+        email: "ada@example.com",
+      }),
+    });
+
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({
+      success: false,
+      message: "User is already a MEMBER, cannot create new account",
+      error: "User is already a MEMBER, cannot create new account",
+    });
+  });
+
   it("logs in member", async () => {
     loginService.mockResolvedValue({
       success: true,

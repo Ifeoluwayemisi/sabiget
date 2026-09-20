@@ -30,7 +30,7 @@
   --radius-card: 28px;
   --radius-panel: 36px;
 
-  --font-sans-stack: "Segoe UI", "Avenir Next", "Helvetica Neue", sans-serif;
+  --font-sans-stack: var(--font-inter), "Segoe UI", "Avenir Next", "Helvetica Neue", sans-serif;
   --font-mono-stack: "SFMono-Regular", "Cascadia Code", "Consolas", monospace;
 }
 
@@ -66,6 +66,7 @@
 
 html {
   scroll-behavior: smooth;
+  overflow-x: hidden;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -224,5 +225,14 @@ textarea {
 
   .text-balance {
     text-wrap: balance;
+  }
+
+  .scrollbar-hide {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
   }
 }

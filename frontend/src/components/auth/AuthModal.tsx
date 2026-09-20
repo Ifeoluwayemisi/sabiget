@@ -53,6 +53,8 @@ const panelVariants = {
 interface AuthModalProps {
   isOpen: boolean;
   onClose: () => void;
+  onSuccess?: () => void;
+  initialIntent?: Intent;
 }
 
 interface Feedback {
@@ -84,7 +86,7 @@ const INTENT_COPY: Record<
   },
 };
 
-export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
+export default function AuthModal({ isOpen, onClose, onSuccess, initialIntent }: AuthModalProps) {
   const [intent, setIntent] = useState<Intent | null>(null);
   const [step, setStep] = useState<Step>("choose");
   const [phone, setPhone] = useState("");
@@ -117,8 +119,14 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
   if (prevOpen !== isOpen) {
     setPrevOpen(isOpen);
     if (isOpen) {
-      setIntent(null);
-      setStep("choose");
+      // If an initialIntent is provided, skip the "choose" step
+      if (initialIntent) {
+        setIntent(initialIntent);
+        setStep("phone");
+      } else {
+        setIntent(null);
+        setStep("choose");
+      }
       setPhone("");
       setGuestEmail("");
       setOtp("");
@@ -315,6 +323,7 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
           text: "You're ready to order.",
         });
         onClose();
+        onSuccess?.();
       }
     } catch (error) {
       console.error("Failed to verify OTP:", error);
@@ -378,6 +387,7 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
       storeTokens(data);
       setFeedback({ type: "success", text: data.message || "Account created." });
       onClose();
+      onSuccess?.();
     } catch (error) {
       console.error("Failed to create account:", error);
       const message =
