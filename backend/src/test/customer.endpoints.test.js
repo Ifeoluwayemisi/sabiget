@@ -119,6 +119,7 @@ describe("customer endpoint verification", () => {
       id: "vendor_1",
       name: "Food Place",
       isActive: true,
+      isVerified: true,
       metrics: { avgPreparationTime: 15 },
       products: [
         { id: "p1", name: "Jollof", category: "Rice", price: 2500, tags: [] },
@@ -129,6 +130,43 @@ describe("customer endpoint verification", () => {
 
     expect(response.status).toBe(200);
     expect(response.body.vendor.categories).toHaveLength(1);
+  });
+
+  // An unverified vendor must never be reachable by customers, even via a
+  // direct/shared link to its id — verification gates live-ness the same
+  // way it gates nearby-vendor discovery.
+  it("hides an active but unverified vendor's menu from customers", async () => {
+    prisma.Vendor.findUnique.mockResolvedValue({
+      id: "vendor_1",
+      name: "Food Place",
+      isActive: true,
+      isVerified: false,
+      metrics: null,
+      products: [
+        { id: "p1", name: "Jollof", category: "Rice", price: 2500, tags: [] },
+      ],
+    });
+
+    const response = await server.request("/vendors/vendor_1/menu", { method: "GET" });
+
+    expect(response.status).toBe(404);
+    expect(response.body.success).toBe(false);
+  });
+
+  it("hides an inactive vendor's menu from customers even if verified", async () => {
+    prisma.Vendor.findUnique.mockResolvedValue({
+      id: "vendor_1",
+      name: "Food Place",
+      isActive: false,
+      isVerified: true,
+      metrics: null,
+      products: [],
+    });
+
+    const response = await server.request("/vendors/vendor_1/menu", { method: "GET" });
+
+    expect(response.status).toBe(404);
+    expect(response.body.success).toBe(false);
   });
 
   it("returns order detail", async () => {
@@ -412,6 +450,7 @@ describe("customer-only routes RBAC", () => {
       id: "vendor_1",
       name: "Food Place",
       isActive: true,
+      isVerified: true,
       metrics: { avgPreparationTime: 15 },
       products: [],
     });

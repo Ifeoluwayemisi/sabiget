@@ -74,14 +74,9 @@ function VendorOverview({ menu }: { menu: VendorMenuInfo }) {
           </div>
 
           <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <h2 className="truncate text-xl font-bold text-[#111111]">
-                {menu.name}
-              </h2>
-              <span className="rounded-full bg-[var(--color-brand-soft)] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#a82b00]">
-                Open
-              </span>
-            </div>
+            <h2 className="truncate text-xl font-bold text-[#111111]">
+              {menu.name}
+            </h2>
             <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-[#5f5a57]">
               {menu.averageRating != null && (
                 <span className="inline-flex items-center gap-1 font-semibold text-[#111111]">

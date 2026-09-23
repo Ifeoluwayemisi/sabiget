@@ -409,4 +409,100 @@ describe("vendor store setup: business info + location + discoverability", () =>
       }),
     );
   });
+
+  // ---- GET /:id and /:id/menu — a direct/shared link must not bypass the
+  // same "unverified = not live" rule enforced by discovery above. ----------
+
+  const verifiedActiveVendor = {
+    id: "vendor_1",
+    name: "Ready Kitchen",
+    description: "Local favorite",
+    phone: "+2348000000000",
+    email: "ready@example.com",
+    latitude: 6.5,
+    longitude: 3.35,
+    isActive: true,
+    isVerified: true,
+    metrics: { avgPreparationTime: 15 },
+    products: [{ id: "p1", name: "Jollof", category: "Rice" }],
+  };
+
+  it("GET /:id returns an active, verified vendor's public profile", async () => {
+    prisma.Vendor.findUnique.mockResolvedValue(verifiedActiveVendor);
+
+    const response = await server.request("/vendor_1", { method: "GET" });
+
+    expect(response.status).toBe(200);
+    expect(response.body.vendor.id).toBe("vendor_1");
+    expect(response.body.vendor.categories).toHaveLength(1);
+  });
+
+  it("GET /:id hides an active but unverified vendor", async () => {
+    prisma.Vendor.findUnique.mockResolvedValue({
+      ...verifiedActiveVendor,
+      isVerified: false,
+    });
+
+    const response = await server.request("/vendor_1", { method: "GET" });
+
+    expect(response.status).toBe(404);
+    expect(response.body.success).toBe(false);
+  });
+
+  it("GET /:id hides an inactive vendor even if verified", async () => {
+    prisma.Vendor.findUnique.mockResolvedValue({
+      ...verifiedActiveVendor,
+      isActive: false,
+    });
+
+    const response = await server.request("/vendor_1", { method: "GET" });
+
+    expect(response.status).toBe(404);
+    expect(response.body.success).toBe(false);
+  });
+
+  it("GET /:id/menu returns the menu for an active, verified vendor", async () => {
+    prisma.Vendor.findUnique.mockResolvedValue({
+      id: "vendor_1",
+      name: "Ready Kitchen",
+      isActive: true,
+      isVerified: true,
+    });
+    prisma.Product.findMany.mockResolvedValue([
+      { id: "p1", name: "Jollof", category: "Rice" },
+    ]);
+
+    const response = await server.request("/vendor_1/menu", { method: "GET" });
+
+    expect(response.status).toBe(200);
+    expect(response.body.menu).toHaveLength(1);
+  });
+
+  it("GET /:id/menu hides an active but unverified vendor's menu", async () => {
+    prisma.Vendor.findUnique.mockResolvedValue({
+      id: "vendor_1",
+      name: "Ready Kitchen",
+      isActive: true,
+      isVerified: false,
+    });
+
+    const response = await server.request("/vendor_1/menu", { method: "GET" });
+
+    expect(response.status).toBe(404);
+    expect(response.body.success).toBe(false);
+  });
+
+  it("GET /:id/menu hides an inactive vendor's menu even if verified", async () => {
+    prisma.Vendor.findUnique.mockResolvedValue({
+      id: "vendor_1",
+      name: "Ready Kitchen",
+      isActive: false,
+      isVerified: true,
+    });
+
+    const response = await server.request("/vendor_1/menu", { method: "GET" });
+
+    expect(response.status).toBe(404);
+    expect(response.body.success).toBe(false);
+  });
 });

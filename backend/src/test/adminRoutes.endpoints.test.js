@@ -1,6 +1,13 @@
+import { afterAll, afterEach, beforeEach, describe, expect, it, jest } from "@jest/globals";
+
+// Restored from a pre-ESM-migration CommonJS test file (see
+// vendorRoutes.endpoints.test.js for context). Assertions unchanged.
+
 let mockCurrentUser;
 
-jest.mock("../middleware/auth", () => ({
+const triggerOrderRefund = jest.fn();
+
+await jest.unstable_mockModule("../middleware/auth.js", () => ({
   authenticateToken: (req, res, next) => {
     req.user = mockCurrentUser;
     next();
@@ -15,13 +22,12 @@ jest.mock("../middleware/auth", () => ({
     },
 }));
 
-jest.mock("../services/orderService", () => ({
-  triggerOrderRefund: jest.fn(),
+await jest.unstable_mockModule("../services/orderService.js", () => ({
+  triggerOrderRefund,
 }));
 
-const { startTestServer } = require("../test/startTestServer");
-const { triggerOrderRefund } = require("../services/orderService");
-const adminRouter = require("./adminRoutes");
+const { startTestServer } = await import("./startTestServer.js");
+const adminRouter = (await import("../routes/adminRoutes.js")).default;
 
 describe("adminRoutes", () => {
   let server;

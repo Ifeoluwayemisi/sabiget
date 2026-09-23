@@ -1,13 +1,20 @@
-jest.mock("../services/memberAuthService", () => ({
-  createMemberAccountService: jest.fn(),
-  loginService: jest.fn(),
-}));
+import { beforeEach, describe, expect, it, jest } from "@jest/globals";
 
-const {
+// Restored from a pre-ESM-migration CommonJS test file (see
+// authController.test.js for context). Unit-style, assertions unchanged.
+// Note: "returns tokens when authenticated guest upgrade succeeds" overlaps
+// with customer.endpoints.test.js's account-creation coverage at the HTTP
+// level; kept as-is per the instruction not to weaken/drop restored tests.
+
+const createMemberAccountService = jest.fn();
+const loginService = jest.fn();
+
+await jest.unstable_mockModule("../services/memberAuthService.js", () => ({
   createMemberAccountService,
   loginService,
-} = require("../services/memberAuthService");
-const memberAuthController = require("./memberAuthController");
+}));
+
+const memberAuthController = await import("../controllers/memberAuthController.js");
 
 function createRes() {
   return {

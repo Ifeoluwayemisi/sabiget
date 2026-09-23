@@ -59,12 +59,58 @@ function buildVendorPublicProfile(vendor) {
 
 /**
  * GET /api/vendors/nearby
- * Find vendors near user's location
- * Query params: lat, lng, radius (optional, default 5km)
+ * Discover active, verified vendors.
+ *
+ * Two modes:
+ * - Geolocation mode: `lat` + `lng` + `radius` (optional, default 5km).
+ *   Uses the existing Haversine/radius discovery path around the customer's
+ *   real coordinates.
+ * - Manual-area mode: `area` (optional string). Matches the vendor's own
+ *   declared LGA or free-text address (case-insensitive contains) with NO
+ *   geospatial anchor, so a typed area such as Ikeja, Abuja, Ibadan or Port
+ *   Harcourt is genuinely what drives the query. The discoverability rules
+ *   (isActive + isVerified) are enforced in both modes.
  */
 router.get("/nearby", optionalAuth, async (req, res) => {
   try {
-    const { lat, lng, radius } = req.query;
+    const { lat, lng, radius, area } = req.query;
+
+    const hasArea = typeof area === "string" && area.trim() !== "";
+
+    if (hasArea) {
+      const trimmedArea = area.trim();
+
+      const areaVendors = await global.prisma.Vendor.findMany({
+        where: {
+          isActive: true,
+          isVerified: true,
+          OR: [
+            { lga: { contains: trimmedArea, mode: "insensitive" } },
+            { address: { contains: trimmedArea, mode: "insensitive" } },
+          ],
+        },
+        orderBy: { name: "asc" },
+        include: {
+          metrics: true,
+        },
+      });
+
+      // Area mode has no user anchor point, so distance and delivery ETA
+      // cannot be honestly derived. They are left null rather than invented
+      // around a fixed/assumed coordinate.
+      const mappedVendors = areaVendors.map((vendor) => ({
+        ...buildVendorPublicProfile(vendor),
+        distanceKm: null,
+        estimatedDeliveryMinutes: null,
+      }));
+
+      return res.json({
+        success: true,
+        area: trimmedArea,
+        count: mappedVendors.length,
+        vendors: mappedVendors,
+      });
+    }
 
     if (!lat || !lng) {
       return res.status(400).json({
@@ -501,7 +547,9 @@ router.get("/:id", async (req, res) => {
       },
     });
 
-    if (!vendor || !vendor.isActive) {
+    // An unverified vendor is not live to customers, whether they arrive via
+    // search (already filtered) or a direct/shared link to this id.
+    if (!vendor || !vendor.isActive || !vendor.isVerified) {
       return res.status(404).json({
         success: false,
         error: "Vendor not found",
@@ -534,10 +582,13 @@ router.get("/:id/menu", async (req, res) => {
         id: true,
         name: true,
         isActive: true,
+        isVerified: true,
       },
     });
 
-    if (!vendor || !vendor.isActive) {
+    // Same rule as discovery and the profile endpoint above: unverified =
+    // not live, even for a direct link.
+    if (!vendor || !vendor.isActive || !vendor.isVerified) {
       return res.status(404).json({
         success: false,
         error: "Vendor not found",

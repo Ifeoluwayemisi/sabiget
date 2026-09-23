@@ -114,7 +114,16 @@ export default function PopularCategories() {
               initial="hidden"
               whileInView="visible"
               viewport={{ once: true, margin: "-40px" }}
-              onClick={() => router.push(`/shop?category=${encodeURIComponent(cat.slug)}`)}
+              onClick={() =>
+                router.push(
+                  // "Local favorites" isn't a real backing category/field —
+                  // route it to browse-all rather than a filter that could
+                  // never match anything.
+                  cat.slug === "local-favorites"
+                    ? "/shop"
+                    : `/shop?category=${encodeURIComponent(cat.slug)}`,
+                )
+              }
               className="group flex w-[84px] shrink-0 flex-col items-center gap-2.5 snap-start sm:w-[96px]"
             >
               <span className="relative h-[72px] w-[72px] overflow-hidden rounded-2xl ring-1 ring-black/[0.06] transition-all duration-200 group-hover:-translate-y-1 group-hover:ring-[#ff4500]/40 sm:h-20 sm:w-20">

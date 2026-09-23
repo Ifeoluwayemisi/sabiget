@@ -336,6 +336,61 @@ expect(first.success).toBe(true);
     );
   });
 
+  // Display-only: the vendor UI needs attempts-remaining/lockout info to
+  // show a precise message instead of a generic failure. This does not
+  // change the increment/lockout logic itself (covered above).
+  it("reports attempts remaining on a wrong DVC so the UI can display it", async () => {
+    prisma.Order.findUnique
+      .mockResolvedValueOnce({
+        id: "ord_12b",
+        vendorId: "vendor_1",
+        status: "OUT_FOR_DELIVERY",
+        dvcCode: hashCode("ABCD12"),
+        dvcLockedUntil: null,
+      })
+      .mockResolvedValueOnce({ dvcAttempts: 1, dvcLockedUntil: null })
+      .mockResolvedValueOnce({ dvcAttempts: 1, dvcLockedUntil: null });
+    prisma.Order.update.mockResolvedValue({});
+
+    const server = servers.at(-1);
+    const response = await server.request("/ord_12b/verify-dvc", {
+      method: "POST",
+      body: JSON.stringify({ dvcCode: "ZZZZ99" }),
+    });
+
+    expect(response.status).toBe(400);
+    expect(response.body.attemptsRemaining).toBe(2);
+    expect(response.body).not.toHaveProperty("locked");
+  });
+
+  it("reports lockedUntil when a wrong DVC trips the lockout threshold", async () => {
+    const lockUntil = new Date(Date.now() + 15 * 60 * 1000);
+    prisma.Order.findUnique
+      .mockResolvedValueOnce({
+        id: "ord_13b",
+        vendorId: "vendor_1",
+        status: "OUT_FOR_DELIVERY",
+        dvcCode: hashCode("ABCD12"),
+        dvcLockedUntil: null,
+      })
+      .mockResolvedValueOnce({ dvcAttempts: 3, dvcLockedUntil: null })
+      .mockResolvedValueOnce({ dvcAttempts: 3, dvcLockedUntil: lockUntil });
+    prisma.Order.update.mockResolvedValue({});
+    prisma.Order.updateMany.mockResolvedValue({ count: 1 });
+
+    const server = servers.at(-1);
+    const response = await server.request("/ord_13b/verify-dvc", {
+      method: "POST",
+      body: JSON.stringify({ dvcCode: "ZZZZ99" }),
+    });
+
+    expect(response.status).toBe(403);
+    expect(response.body.locked).toBe(true);
+    expect(new Date(response.body.lockedUntil).getTime()).toBe(
+      lockUntil.getTime(),
+    );
+  });
+
   it("locks DVC verification after the configured max attempts", async () => {
     prisma.Order.findUnique
       .mockResolvedValueOnce({
@@ -382,6 +437,8 @@ expect(first.success).toBe(true);
 
     expect(response.status).toBe(403);
     expect(response.body.error).toContain("locked");
+    expect(response.body.locked).toBe(true);
+    expect(response.body.lockedUntil).toBeDefined();
   });
 
   it("retries stranded refunds without touching cashed-out or customercancelled orders", async () => {

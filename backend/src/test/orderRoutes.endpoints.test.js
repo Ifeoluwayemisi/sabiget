@@ -1,9 +1,19 @@
-const express = require("express");
-const { startTestServer } = require("../test/startTestServer");
+import { afterAll, afterEach, beforeEach, describe, expect, it, jest } from "@jest/globals";
+
+// Restored from a pre-ESM-migration CommonJS test file (see
+// vendorRoutes.endpoints.test.js for context). Assertions unchanged.
+// This mocks ../services/orderService.js entirely — orderService.js's own
+// real logic is exercised separately by orderService.test.js and
+// orderTransitions.test.js.
 
 let mockCurrentUser;
 
-jest.mock("../middleware/auth", () => ({
+const initializePayment = jest.fn();
+const autoKillExpiredPendingOrder = jest.fn((order) => Promise.resolve(order));
+const completeDeliveredOrder = jest.fn();
+const triggerOrderRefund = jest.fn(() => Promise.resolve({ success: true }));
+
+await jest.unstable_mockModule("../middleware/auth.js", () => ({
   authenticateToken: (req, res, next) => {
     req.user = mockCurrentUser;
     next();
@@ -21,28 +31,23 @@ jest.mock("../middleware/auth", () => ({
     },
 }));
 
-jest.mock("../middleware/rateLimiter", () => ({
+await jest.unstable_mockModule("../middleware/rateLimiter.js", () => ({
   checkoutLimiter: (req, res, next) => next(),
 }));
 
-jest.mock("../utils/paystack", () => ({
-  initializePayment: jest.fn(),
+await jest.unstable_mockModule("../utils/paystack.js", () => ({
+  initializePayment,
 }));
 
-jest.mock("../services/orderService", () => ({
+await jest.unstable_mockModule("../services/orderService.js", () => ({
   CANCELLABLE_STATUSES: new Set(["PENDING"]),
-  autoKillExpiredPendingOrder: jest.fn((order) => Promise.resolve(order)),
-  completeDeliveredOrder: jest.fn(),
-  triggerOrderRefund: jest.fn(() => Promise.resolve({ success: true })),
-}));
-
-const { initializePayment } = require("../utils/paystack");
-const {
   autoKillExpiredPendingOrder,
   completeDeliveredOrder,
   triggerOrderRefund,
-} = require("../services/orderService");
-const orderRouter = require("./orderRoutes");
+}));
+
+const { startTestServer } = await import("./startTestServer.js");
+const orderRouter = (await import("../routes/orderRoutes.js")).default;
 
 describe("orderRoutes", () => {
   let server;
@@ -56,6 +61,7 @@ describe("orderRoutes", () => {
         findMany: jest.fn(),
         create: jest.fn(),
         update: jest.fn(),
+        updateMany: jest.fn(),
       },
       User: {
         findUnique: jest.fn(),
@@ -213,23 +219,29 @@ describe("orderRoutes", () => {
       id: "vendor_3",
       userId: "vendor_user_3",
     });
-    prisma.Order.findUnique.mockResolvedValue({
-      id: "ord_5",
-      vendorId: "vendor_3",
-      status: "PENDING",
-    });
+    // First findUnique: the order fetched before the atomic claim. Second:
+    // the cancelled order re-fetched after the claim succeeds, passed to
+    // triggerOrderRefund. The status transition itself is an atomic
+    // updateMany claim, not a plain update (concurrency-safety refactor).
+    prisma.Order.findUnique
+      .mockResolvedValueOnce({
+        id: "ord_5",
+        vendorId: "vendor_3",
+        status: "PENDING",
+      })
+      .mockResolvedValueOnce({
+        id: "ord_5",
+        vendorId: "vendor_3",
+        status: "CANCELLED_VENDOR",
+        totalAmount: 5000,
+        paymentReference: "pay_ref_5",
+      });
     autoKillExpiredPendingOrder.mockResolvedValue({
       id: "ord_5",
       vendorId: "vendor_3",
       status: "PENDING",
     });
-    prisma.Order.update.mockResolvedValue({
-      id: "ord_5",
-      vendorId: "vendor_3",
-      status: "CANCELLED_VENDOR",
-      totalAmount: 5000,
-      paymentReference: "pay_ref_5",
-    });
+    prisma.Order.updateMany.mockResolvedValue({ count: 1 });
     triggerOrderRefund.mockResolvedValue({
       success: false,
       error: "provider timeout",
@@ -249,23 +261,25 @@ describe("orderRoutes", () => {
   });
 
   it("surfaces refund initialization failure during customer cancellation", async () => {
-    prisma.Order.findUnique.mockResolvedValue({
-      id: "ord_6",
-      userId: "user_1",
-      status: "PENDING",
-    });
+    prisma.Order.findUnique
+      .mockResolvedValueOnce({
+        id: "ord_6",
+        userId: "user_1",
+        status: "PENDING",
+      })
+      .mockResolvedValueOnce({
+        id: "ord_6",
+        userId: "user_1",
+        status: "CANCELLED_CUSTOMER",
+        totalAmount: 2500,
+        paymentReference: "pay_ref_6",
+      });
     autoKillExpiredPendingOrder.mockResolvedValue({
       id: "ord_6",
       userId: "user_1",
       status: "PENDING",
     });
-    prisma.Order.update.mockResolvedValue({
-      id: "ord_6",
-      userId: "user_1",
-      status: "CANCELLED_CUSTOMER",
-      totalAmount: 2500,
-      paymentReference: "pay_ref_6",
-    });
+    prisma.Order.updateMany.mockResolvedValue({ count: 1 });
     triggerOrderRefund.mockResolvedValue({
       success: false,
       error: "refund unavailable",

@@ -50,6 +50,18 @@ JWT_REFRESH_SECRET=your_refresh_secret_here
 PAYSTACK_PUBLIC_KEY=pk_test_xxxxx
 PAYSTACK_SECRET_KEY=sk_test_xxxxx
 
+# Product media (S3-compatible object storage)
+# The bucket/CDN must allow public GET access to completed product objects,
+# while uploads remain restricted to short-lived signed PUT URLs. Configure
+# bucket CORS to allow PUT from FRONTEND_URL with Content-Type headers.
+MEDIA_BUCKET=sabiget-product-media
+MEDIA_REGION=eu-west-1
+MEDIA_ACCESS_KEY_ID=your_media_access_key
+MEDIA_SECRET_ACCESS_KEY=your_media_secret_key
+MEDIA_PUBLIC_BASE_URL=https://cdn.example.com
+# Optional for S3-compatible providers such as MinIO or Cloudflare R2:
+# MEDIA_ENDPOINT=https://object-storage.example.com
+
 # Termii
 TERMII_API_KEY=your_termii_key
 ```

@@ -128,7 +128,9 @@ router.get("/vendors/:vendorId/menu", optionalAuth, async (req, res) => {
       },
     });
 
-    if (!vendor || !vendor.isActive) {
+    // Same rule as nearby-vendor discovery: an unverified vendor is not
+    // live to customers, even via a direct/shared link to this id.
+    if (!vendor || !vendor.isActive || !vendor.isVerified) {
       return res.status(404).json({
         success: false,
         message: "Vendor not found",

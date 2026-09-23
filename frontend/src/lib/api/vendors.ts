@@ -12,18 +12,14 @@ type NearbyVendorsResponse = {
   vendors?: unknown;
 };
 
-export async function fetchNearbyVendors(options: {
-  latitude: number;
-  longitude: number;
-  radiusKm?: number;
-  signal?: AbortSignal;
-}): Promise<VendorCardData[]> {
-  const { latitude, longitude, radiusKm = 5, signal } = options;
-
-  const response = await fetch(
-    `${API_BASE_URL}/vendors/nearby?lat=${latitude}&lng=${longitude}&radius=${radiusKm}`,
-    { headers: { Accept: "application/json" }, signal },
-  );
+async function requestNearbyVendors(
+  url: string,
+  signal?: AbortSignal,
+): Promise<VendorCardData[]> {
+  const response = await fetch(url, {
+    headers: { Accept: "application/json" },
+    signal,
+  });
 
   if (!response.ok) {
     throw new NearbyVendorsError(
@@ -42,6 +38,33 @@ export async function fetchNearbyVendors(options: {
   return data.vendors
     .map((vendor) => mapNearbyVendor(vendor as Record<string, unknown>))
     .filter((vendor): vendor is VendorCardData => vendor !== null);
+}
+
+export async function fetchNearbyVendors(options: {
+  latitude: number;
+  longitude: number;
+  radiusKm?: number;
+  signal?: AbortSignal;
+}): Promise<VendorCardData[]> {
+  const { latitude, longitude, radiusKm = 5, signal } = options;
+
+  return requestNearbyVendors(
+    `${API_BASE_URL}/vendors/nearby?lat=${latitude}&lng=${longitude}&radius=${radiusKm}`,
+    signal,
+  );
+}
+
+/** Manual-area discovery: the typed area genuinely drives the backend query. */
+export async function fetchNearbyVendorsByArea(options: {
+  area: string;
+  signal?: AbortSignal;
+}): Promise<VendorCardData[]> {
+  const { area, signal } = options;
+
+  return requestNearbyVendors(
+    `${API_BASE_URL}/vendors/nearby?area=${encodeURIComponent(area.trim())}`,
+    signal,
+  );
 }
 
 /** Fetch one vendor's typed menu (GET /customers/vendors/:vendorId/menu). */

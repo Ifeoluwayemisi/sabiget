@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { Socket } from "socket.io-client";
-import { API_BASE_URL, getAccessToken } from "@/lib/api/client";
+import { API_BASE_URL, apiRequest, getAccessToken } from "@/lib/api/client";
 import {
   getSocket,
   joinCustomerRoom,
@@ -60,13 +60,16 @@ export function useOrderStatus(orderId: string | null) {
 
       // The guest endpoint authenticates with the scoped token itself, so
       // the shared client's session-token logic does not apply here.
-      const endpoint = accessToken
-        ? `/orders/${effectiveOrderId}`
-        : `/orders/${effectiveOrderId}/guest-status`;
+      const isGuest = !accessToken;
+      const endpoint = isGuest
+        ? `/orders/${effectiveOrderId}/guest-status`
+        : `/orders/${effectiveOrderId}`;
 
-      const response = await fetch(`${API_BASE_URL}${endpoint}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const response = isGuest
+        ? await fetch(`${API_BASE_URL}${endpoint}`, {
+            headers: { Authorization: `Bearer ${token}` },
+          })
+        : await apiRequest(endpoint);
 
       if (!response.ok) {
         throw new Error("Unable to fetch order");
@@ -75,8 +78,7 @@ export function useOrderStatus(orderId: string | null) {
       const data = (await response.json()) as { order?: TrackedOrder };
       setOrder(data.order ?? null);
       return data.order?.status ?? null;
-    } catch (error) {
-      console.error("Failed to fetch order status:", error);
+    } catch {
       return null;
     } finally {
       setLoading(false);

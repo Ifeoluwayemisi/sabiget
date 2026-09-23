@@ -1,8 +1,19 @@
-jest.mock("../utils/paystack", () => ({
-  initiateRefund: jest.fn(),
+import { afterAll, beforeEach, describe, expect, it, jest } from "@jest/globals";
+
+// Restored from a pre-ESM-migration CommonJS test file (see
+// authController.test.js for context). Unit-style, assertions unchanged.
+// Complements orderTransitions.test.js: that suite covers these same
+// orderService functions through the HTTP route layer (accept/reject/
+// complete/DVC); this file unit-tests the service exports directly,
+// including CANCELLABLE_STATUSES/isAcceptanceExpired and the batch
+// autoKillExpiredPendingOrders() path that isn't exercised at the HTTP layer.
+
+const initiateRefund = jest.fn();
+
+await jest.unstable_mockModule("../utils/paystack.js", () => ({
+  initiateRefund,
 }));
 
-const { initiateRefund } = require("../utils/paystack");
 const {
   CANCELLABLE_STATUSES,
   isAcceptanceExpired,
@@ -10,7 +21,7 @@ const {
   autoKillExpiredPendingOrder,
   autoKillExpiredPendingOrders,
   completeDeliveredOrder,
-} = require("./orderService");
+} = await import("../services/orderService.js");
 
 describe("orderService", () => {
   let prisma;
@@ -19,6 +30,7 @@ describe("orderService", () => {
     prisma = {
       Order: {
         update: jest.fn(),
+        updateMany: jest.fn(),
         findUnique: jest.fn(),
         findMany: jest.fn(),
       },
@@ -82,6 +94,9 @@ describe("orderService", () => {
         data: { refundId: "ref_1" },
       });
 
+      // The refund claim is an atomic updateMany guard (concurrency-safety
+      // refactor) — {count: 1} means this call won the claim.
+      prisma.Order.updateMany.mockResolvedValue({ count: 1 });
       prisma.Order.update.mockResolvedValue({
         id: "ord_2",
         status: "REFUNDED",
@@ -121,6 +136,7 @@ describe("orderService", () => {
         success: false,
         error: "refund failed",
       });
+      prisma.Order.updateMany.mockResolvedValue({ count: 1 });
 
       const result = await triggerOrderRefund(
         {
@@ -167,7 +183,16 @@ describe("orderService", () => {
         success: true,
       });
 
-      prisma.Order.update
+      // Both the auto-kill transition and the refund claim inside
+      // triggerOrderRefund are atomic updateMany guards (concurrency-safety
+      // refactor) rather than plain updates.
+      prisma.Order.updateMany.mockResolvedValue({ count: 1 });
+      prisma.Order.update.mockResolvedValue({
+        ...expiredOrder,
+        status: "REFUNDED",
+      });
+
+      prisma.Order.findUnique
         .mockResolvedValueOnce({
           ...expiredOrder,
           status: "CANCELLED_AUTO_KILL",
@@ -177,17 +202,12 @@ describe("orderService", () => {
           status: "REFUNDED",
         });
 
-      prisma.Order.findUnique.mockResolvedValue({
-        ...expiredOrder,
-        status: "REFUNDED",
-      });
-
       const result = await autoKillExpiredPendingOrder(expiredOrder);
 
-      expect(prisma.Order.update).toHaveBeenNthCalledWith(
+      expect(prisma.Order.updateMany).toHaveBeenNthCalledWith(
         1,
         expect.objectContaining({
-          where: { id: "ord_5" },
+          where: { id: "ord_5", status: "PENDING" },
           data: expect.objectContaining({
             status: "CANCELLED_AUTO_KILL",
             autoKilledAt: expect.any(Date),
@@ -223,13 +243,15 @@ describe("orderService", () => {
 
       prisma.Order.findMany.mockResolvedValue(orders);
       initiateRefund.mockResolvedValue({ success: true });
-      prisma.Order.update
+      // Per order: one updateMany claim for the auto-kill transition, one
+      // updateMany claim for the refund, then one plain update to finalize
+      // as REFUNDED, then two findUnique reads (post-claim, post-refund).
+      prisma.Order.updateMany.mockResolvedValue({ count: 1 });
+      prisma.Order.update.mockResolvedValue({});
+      prisma.Order.findUnique
         .mockResolvedValueOnce({ ...orders[0], status: "CANCELLED_AUTO_KILL" })
         .mockResolvedValueOnce({ ...orders[0], status: "REFUNDED" })
         .mockResolvedValueOnce({ ...orders[1], status: "CANCELLED_AUTO_KILL" })
-        .mockResolvedValueOnce({ ...orders[1], status: "REFUNDED" });
-      prisma.Order.findUnique
-        .mockResolvedValueOnce({ ...orders[0], status: "REFUNDED" })
         .mockResolvedValueOnce({ ...orders[1], status: "REFUNDED" });
 
       const processed = await autoKillExpiredPendingOrders(10);
@@ -252,20 +274,21 @@ describe("orderService", () => {
 
   describe("completeDeliveredOrder", () => {
     it("completes a delivered order", async () => {
-      prisma.Order.findUnique.mockResolvedValue({
-        id: "ord_8",
-        status: "DELIVERED",
-      });
-      prisma.Order.update.mockResolvedValue({
-        id: "ord_8",
-        status: "COMPLETED",
-        completedAt: new Date(),
-      });
+      // The completion transition is an atomic updateMany guard
+      // (concurrency-safety refactor), followed by a re-read.
+      prisma.Order.findUnique
+        .mockResolvedValueOnce({ id: "ord_8", status: "DELIVERED" })
+        .mockResolvedValueOnce({
+          id: "ord_8",
+          status: "COMPLETED",
+          completedAt: new Date(),
+        });
+      prisma.Order.updateMany.mockResolvedValue({ count: 1 });
 
       const result = await completeDeliveredOrder("ord_8");
 
-      expect(prisma.Order.update).toHaveBeenCalledWith({
-        where: { id: "ord_8" },
+      expect(prisma.Order.updateMany).toHaveBeenCalledWith({
+        where: { id: "ord_8", status: "DELIVERED" },
         data: expect.objectContaining({
           status: "COMPLETED",
           completedAt: expect.any(Date),

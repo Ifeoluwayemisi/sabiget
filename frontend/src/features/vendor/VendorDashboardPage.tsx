@@ -27,7 +27,10 @@ import {
   logout,
 } from "@/lib/api/client";
 import { closeSocket } from "@/lib/socket";
-import { fetchVendorProfile, type VendorProfile } from "@/lib/api/vendorProfile";
+import {
+  fetchVendorProfile,
+  type VendorProfile,
+} from "@/lib/api/vendorProfile";
 import { getVendorSetupState } from "@/lib/vendorSetup";
 import { getOrderStatusMeta } from "@/lib/orderStatus";
 import VendorOrdersSection from "@/features/vendor/VendorOrdersSection";
@@ -281,25 +284,25 @@ export default function VendorDashboardPage() {
           title: "Total orders",
           value: dashboard.orders.totalOrders,
           icon: ShoppingBag,
-          accent: "bg-orange-500",
+          accent: "bg-[var(--color-brand)]",
         },
         {
           title: "Active orders",
           value: dashboard.orders.activeOrders,
           icon: Clock3,
-          accent: "bg-amber-500",
+          accent: "bg-[#d97706]",
         },
         {
           title: "Completed",
           value: dashboard.orders.completedOrders,
           icon: CheckCircle2,
-          accent: "bg-emerald-500",
+          accent: "bg-[var(--color-accent)]",
         },
         {
           title: "Revenue",
           value: `₦${dashboard.earnings.totalRevenue.toLocaleString()}`,
           icon: Wallet,
-          accent: "bg-violet-500",
+          accent: "bg-[#8b5e34]",
         },
       ]
     : [];
@@ -307,28 +310,28 @@ export default function VendorDashboardPage() {
   if (!token && !loading) {
     const isSignup = authMode === "signup";
     return (
-      <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4 py-10">
-        <div className="w-full max-w-md rounded-2xl border border-gray-200 bg-white p-8 shadow-sm">
+      <div className="flex min-h-screen items-center justify-center bg-[var(--background)] px-4 py-10">
+        <div className="sabiget-card w-full max-w-md p-6 sm:p-8">
           <Link
             href="/"
-            className="mb-4 inline-flex items-center gap-1 text-sm font-medium text-gray-500 hover:text-gray-700"
+            className="mb-4 inline-flex items-center gap-1 text-sm font-semibold text-[var(--color-ink-muted)] hover:text-[var(--color-brand-deep)]"
           >
             <ArrowLeft className="h-4 w-4" />
             Back to SabiGet
           </Link>
 
-          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-orange-50 text-orange-500">
+          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[var(--color-brand-soft)] text-[var(--color-brand)]">
             <Store className="h-6 w-6" />
           </div>
-          <h1 className="mt-4 text-2xl font-black text-gray-900">
+          <h1 className="mt-4 text-2xl font-black text-[var(--color-ink)]">
             Vendor dashboard
           </h1>
-          <p className="mt-1 text-sm text-gray-600">
+          <p className="mt-1 text-sm text-[var(--color-ink-muted)]">
             Sign in to manage your store and incoming orders. New businesses can
             create an account below.
           </p>
 
-          <div className="mt-6 flex rounded-xl bg-gray-100 p-1">
+          <div className="mt-6 flex rounded-2xl bg-[var(--color-surface-muted)] p-1">
             <button
               type="button"
               onClick={() => {
@@ -337,8 +340,8 @@ export default function VendorDashboardPage() {
               }}
               className={`flex-1 rounded-lg px-3 py-2 text-sm font-semibold transition ${
                 !isSignup
-                  ? "bg-white text-gray-900 shadow-sm"
-                  : "text-gray-500"
+                  ? "bg-white text-[var(--color-ink)] shadow-[var(--shadow-card)]"
+                  : "text-[var(--color-ink-muted)]"
               }`}
             >
               Sign in
@@ -351,8 +354,8 @@ export default function VendorDashboardPage() {
               }}
               className={`flex-1 rounded-lg px-3 py-2 text-sm font-semibold transition ${
                 isSignup
-                  ? "bg-white text-gray-900 shadow-sm"
-                  : "text-gray-500"
+                  ? "bg-white text-[var(--color-ink)] shadow-[var(--shadow-card)]"
+                  : "text-[var(--color-ink-muted)]"
               }`}
             >
               Create account
@@ -363,11 +366,11 @@ export default function VendorDashboardPage() {
             {isSignup && (
               <>
                 <label className="block">
-                  <span className="mb-2 block text-sm font-medium text-gray-700">
+                  <span className="mb-2 block text-sm font-semibold text-[var(--color-ink)]">
                     Business name
                   </span>
-                  <div className="flex items-center gap-3 rounded-xl border border-gray-300 px-3 py-3 focus-within:border-orange-500">
-                    <Store className="h-4 w-4 text-gray-400" />
+                  <div className="flex items-center gap-3 rounded-xl border border-[var(--color-line-strong)] bg-[var(--color-surface)] px-3 py-3 focus-within:border-[var(--color-brand)]">
+                    <Store className="h-4 w-4 text-[var(--color-ink-muted)]" />
                     <input
                       type="text"
                       value={authForm.businessName}
@@ -384,11 +387,11 @@ export default function VendorDashboardPage() {
                 </label>
 
                 <label className="block">
-                  <span className="mb-2 block text-sm font-medium text-gray-700">
+                  <span className="mb-2 block text-sm font-semibold text-[var(--color-ink)]">
                     Business phone
                   </span>
-                  <div className="flex items-center gap-3 rounded-xl border border-gray-300 px-3 py-3 focus-within:border-orange-500">
-                    <Phone className="h-4 w-4 text-gray-400" />
+                  <div className="flex items-center gap-3 rounded-xl border border-[var(--color-line-strong)] bg-[var(--color-surface)] px-3 py-3 focus-within:border-[var(--color-brand)]">
+                    <Phone className="h-4 w-4 text-[var(--color-ink-muted)]" />
                     <input
                       type="tel"
                       inputMode="tel"
@@ -408,11 +411,11 @@ export default function VendorDashboardPage() {
             )}
 
             <label className="block">
-              <span className="mb-2 block text-sm font-medium text-gray-700">
+              <span className="mb-2 block text-sm font-semibold text-[var(--color-ink)]">
                 Email
               </span>
-              <div className="flex items-center gap-3 rounded-xl border border-gray-300 px-3 py-3 focus-within:border-orange-500">
-                <Mail className="h-4 w-4 text-gray-400" />
+              <div className="flex items-center gap-3 rounded-xl border border-[var(--color-line-strong)] bg-[var(--color-surface)] px-3 py-3 focus-within:border-[var(--color-brand)]">
+                <Mail className="h-4 w-4 text-[var(--color-ink-muted)]" />
                 <input
                   type="email"
                   autoComplete="email"
@@ -430,11 +433,11 @@ export default function VendorDashboardPage() {
             </label>
 
             <label className="block">
-              <span className="mb-2 block text-sm font-medium text-gray-700">
+              <span className="mb-2 block text-sm font-semibold text-[var(--color-ink)]">
                 Password
               </span>
-              <div className="flex items-center gap-3 rounded-xl border border-gray-300 px-3 py-3 focus-within:border-orange-500">
-                <Lock className="h-4 w-4 text-gray-400" />
+              <div className="flex items-center gap-3 rounded-xl border border-[var(--color-line-strong)] bg-[var(--color-surface)] px-3 py-3 focus-within:border-[var(--color-brand)]">
+                <Lock className="h-4 w-4 text-[var(--color-ink-muted)]" />
                 <input
                   type="password"
                   autoComplete={isSignup ? "new-password" : "current-password"}
@@ -463,7 +466,7 @@ export default function VendorDashboardPage() {
             <button
               onClick={handleVendorAuth}
               disabled={authSubmitting}
-              className="w-full rounded-xl bg-orange-500 px-4 py-3 text-sm font-bold text-white disabled:bg-gray-300"
+              className="sabiget-punch w-full rounded-xl px-4 py-3 text-sm font-bold disabled:bg-[var(--color-line)] disabled:text-[var(--color-ink-muted)]"
             >
               {authSubmitting
                 ? "Please wait..."
@@ -472,7 +475,7 @@ export default function VendorDashboardPage() {
                   : "Sign in to dashboard"}
             </button>
 
-            <p className="text-center text-xs text-gray-400">
+            <p className="text-center text-xs text-[var(--color-ink-muted)]">
               New vendors are taken straight into a guided store setup.
             </p>
           </div>
@@ -483,8 +486,8 @@ export default function VendorDashboardPage() {
 
   if (loading && !dashboard) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-gray-50">
-        <div className="text-lg font-medium text-gray-600">
+      <div className="flex min-h-screen items-center justify-center bg-[var(--background)]">
+        <div className="text-lg font-semibold text-[var(--color-ink-muted)]">
           Loading dashboard...
         </div>
       </div>
@@ -493,14 +496,14 @@ export default function VendorDashboardPage() {
 
   if (error && !dashboard) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4">
-        <div className="max-w-lg rounded-2xl border border-red-200 bg-red-50 p-6 text-red-700">
+      <div className="flex min-h-screen items-center justify-center bg-[var(--background)] px-4">
+        <div className="max-w-lg rounded-2xl border border-red-200 bg-red-50 p-6 text-red-700 shadow-[var(--shadow-card)]">
           <h2 className="text-xl font-bold">Dashboard unavailable</h2>
           <p className="mt-2">{error}</p>
           <button
             type="button"
             onClick={() => void fetchDashboard()}
-            className="mt-4 rounded-xl bg-red-600 px-4 py-2.5 text-sm font-bold text-white"
+            className="mt-4 rounded-xl bg-red-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm"
           >
             Try again
           </button>
@@ -544,11 +547,11 @@ export default function VendorDashboardPage() {
                 onSaved={reloadProfile}
               />
             )}
-            <div className="flex justify-center border-t border-gray-100 pt-6">
+            <div className="flex justify-center border-t border-[var(--color-line)] pt-6">
               <button
                 type="button"
                 onClick={() => void handleLogout()}
-                className="inline-flex min-h-[44px] items-center gap-2 rounded-xl border border-gray-300 px-5 py-2.5 text-sm font-semibold text-gray-700"
+                className="sabiget-outline inline-flex min-h-[44px] items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold"
               >
                 <LogOut className="h-4 w-4" />
                 Log out of dashboard
@@ -563,24 +566,24 @@ export default function VendorDashboardPage() {
           <div className="space-y-6">
             {profile && <StoreStatusBanner profile={profile} />}
 
-            <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+            <div className="sabiget-panel p-5 sm:p-6">
               <div className="flex flex-col justify-between gap-3 md:flex-row md:items-center">
                 <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-orange-500">
+                  <p className="sabiget-badge sabiget-badge-brand">
                     Vendor dashboard
                   </p>
-                  <h1 className="mt-1 text-2xl font-black text-gray-900">
+                  <h1 className="mt-2 text-2xl font-black text-[var(--color-ink)]">
                     {dashboard.vendor.name}
                   </h1>
                 </div>
                 <div className="flex items-center gap-3">
                   <span
-                    className={`rounded-full px-3 py-1 text-xs font-semibold ${dashboard.vendor.isActive ? "bg-emerald-100 text-emerald-700" : "bg-gray-200 text-gray-700"}`}
+                    className={`sabiget-badge ${dashboard.vendor.isActive ? "sabiget-badge-accent" : "bg-[var(--color-surface-muted)] text-[var(--color-ink-muted)]"}`}
                   >
                     {dashboard.vendor.isActive ? "Active" : "Inactive"}
                   </span>
                   <span
-                    className={`rounded-full px-3 py-1 text-xs font-semibold ${dashboard.vendor.isVerified ? "bg-blue-100 text-blue-700" : "bg-amber-100 text-amber-700"}`}
+                    className={`sabiget-badge ${dashboard.vendor.isVerified ? "bg-[#eaf2ff] text-[#285b9a]" : "bg-[#fff4df] text-[#9a5b00]"}`}
                   >
                     {dashboard.vendor.isVerified
                       ? "Verified"
@@ -596,12 +599,14 @@ export default function VendorDashboardPage() {
                   key={title}
                   initial={{ opacity: 0, y: 12 }}
                   animate={{ opacity: 1, y: 0 }}
-                  className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm"
+                  className="sabiget-card p-5"
                 >
                   <div className="flex items-start justify-between">
                     <div>
-                      <p className="text-sm text-gray-500">{title}</p>
-                      <h3 className="mt-3 text-2xl font-black text-gray-900">
+                      <p className="text-sm text-[var(--color-ink-muted)]">
+                        {title}
+                      </p>
+                      <h3 className="mt-3 text-2xl font-black text-[var(--color-ink)]">
                         {value}
                       </h3>
                     </div>
@@ -631,33 +636,33 @@ export default function VendorDashboardPage() {
                   key={key}
                   type="button"
                   onClick={() => setActiveTab(key)}
-                  className="flex items-center justify-between gap-2 rounded-2xl border border-gray-200 bg-white p-4 text-left shadow-sm transition-colors hover:border-orange-200"
+                  className="sabiget-card flex items-center justify-between gap-2 p-4 text-left transition-transform hover:-translate-y-0.5 hover:border-[var(--color-brand)]"
                 >
-                  <span className="flex items-center gap-2.5 text-sm font-semibold text-gray-700">
-                    <Icon className="h-4 w-4 text-orange-500" />
+                  <span className="flex items-center gap-2.5 text-sm font-semibold text-[var(--color-ink)]">
+                    <Icon className="h-4 w-4 text-[var(--color-brand)]" />
                     {label}
                   </span>
-                  <ChevronRight className="h-4 w-4 text-gray-400" />
+                  <ChevronRight className="h-4 w-4 text-[var(--color-ink-muted)]" />
                 </button>
               ))}
             </div>
 
-            <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+            <section className="sabiget-card p-5 sm:p-6">
               <div className="mb-4 flex items-center justify-between">
-                <h2 className="text-xl font-bold text-gray-900">
+                <h2 className="text-xl font-bold text-[var(--color-ink)]">
                   Recent orders
                 </h2>
                 <button
                   type="button"
                   onClick={() => setActiveTab("orders")}
-                  className="text-sm font-semibold text-orange-500"
+                  className="text-sm font-bold text-[var(--color-brand-deep)]"
                 >
                   View all
                 </button>
               </div>
 
               {recentOrders.length === 0 ? (
-                <div className="rounded-xl bg-gray-50 p-4 text-sm text-gray-500">
+                <div className="rounded-xl bg-[var(--color-surface-muted)] p-4 text-sm text-[var(--color-ink-muted)]">
                   No orders yet — when customers place orders they&apos;ll show
                   up here.
                 </div>
@@ -668,14 +673,14 @@ export default function VendorDashboardPage() {
                     return (
                       <div
                         key={order.id}
-                        className="rounded-xl border border-gray-200 bg-gray-50 p-4"
+                        className="rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] p-4"
                       >
                         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                           <div>
-                            <p className="text-sm font-semibold text-gray-900">
+                            <p className="text-sm font-semibold text-[var(--color-ink)]">
                               Order {order.id.slice(0, 8)}
                             </p>
-                            <p className="text-xs text-gray-500">
+                            <p className="text-xs text-[var(--color-ink-muted)]">
                               {order.user?.name || "Guest customer"}
                             </p>
                           </div>
@@ -685,9 +690,8 @@ export default function VendorDashboardPage() {
                             >
                               {meta.label}
                             </span>
-                            <span className="text-sm font-bold text-gray-900">
-                              ₦
-                              {Number(order.totalAmount || 0).toLocaleString()}
+                            <span className="text-sm font-bold text-[var(--color-ink)]">
+                              ₦{Number(order.totalAmount || 0).toLocaleString()}
                             </span>
                           </div>
                         </div>
@@ -704,16 +708,20 @@ export default function VendorDashboardPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-[var(--background)]">
       {/* Desktop sidebar */}
-      <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col border-r border-gray-200 bg-white lg:flex">
-        <div className="flex items-center gap-2 border-b border-gray-100 px-6 py-6">
-          <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#ff4500] text-sm font-black text-white">
+      <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col border-r border-[var(--color-line)] bg-[var(--color-surface-strong)] lg:flex">
+        <div className="flex items-center gap-2 border-b border-[var(--color-line)] px-6 py-6">
+          <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-[var(--color-brand)] text-sm font-black text-white shadow-[var(--shadow-floating)]">
             S
           </span>
           <div>
-            <p className="text-sm font-extrabold text-gray-900">SabiGet</p>
-            <p className="text-xs text-gray-500">Vendor dashboard</p>
+            <p className="text-sm font-extrabold text-[var(--color-ink)]">
+              SabiGet
+            </p>
+            <p className="text-xs text-[var(--color-ink-muted)]">
+              Vendor dashboard
+            </p>
           </div>
         </div>
 
@@ -726,8 +734,8 @@ export default function VendorDashboardPage() {
                   onClick={() => setActiveTab(key)}
                   className={`flex min-h-[44px] w-full items-center gap-3 rounded-xl px-4 py-2.5 text-sm font-semibold transition-colors ${
                     activeTab === key
-                      ? "bg-orange-50 text-orange-500"
-                      : "text-gray-600 hover:bg-gray-50"
+                      ? "bg-[var(--color-brand-soft)] text-[var(--color-brand-deep)]"
+                      : "text-[var(--color-ink-muted)] hover:bg-[var(--color-surface-muted)]"
                   }`}
                 >
                   <Icon className="h-4 w-4" />
@@ -738,11 +746,11 @@ export default function VendorDashboardPage() {
           </ul>
         </nav>
 
-        <div className="border-t border-gray-100 p-4">
+        <div className="border-t border-[var(--color-line)] p-4">
           <button
             type="button"
             onClick={() => void handleLogout()}
-            className="flex min-h-[44px] w-full items-center gap-3 rounded-xl px-4 py-2.5 text-sm font-semibold text-gray-500 transition-colors hover:bg-gray-50"
+            className="flex min-h-[44px] w-full items-center gap-3 rounded-xl px-4 py-2.5 text-sm font-semibold text-[var(--color-ink-muted)] transition-colors hover:bg-[var(--color-surface-muted)]"
           >
             <LogOut className="h-4 w-4" />
             Log out
@@ -760,7 +768,7 @@ export default function VendorDashboardPage() {
       {/* Mobile bottom navigation */}
       <nav
         aria-label="Vendor dashboard sections"
-        className="fixed inset-x-0 bottom-0 z-30 border-t border-gray-200 bg-white pb-[calc(0.25rem+env(safe-area-inset-bottom))] lg:hidden"
+        className="fixed inset-x-0 bottom-0 z-30 border-t border-[var(--color-line)] bg-[var(--color-surface-strong)] pb-[calc(0.25rem+env(safe-area-inset-bottom))] shadow-[0_-8px_24px_rgba(55,28,12,0.06)] lg:hidden"
       >
         <ul className="flex items-stretch justify-between px-2 pt-1.5">
           {NAV_ITEMS.map(({ key, label, icon: Icon }) => (
@@ -771,8 +779,8 @@ export default function VendorDashboardPage() {
                 aria-current={activeTab === key ? "page" : undefined}
                 className={`flex min-h-[52px] w-full flex-col items-center justify-center gap-1 rounded-xl px-1 text-[11px] font-semibold ${
                   activeTab === key
-                    ? "text-orange-500"
-                    : "text-gray-500"
+                    ? "bg-[var(--color-brand-soft)] text-[var(--color-brand-deep)]"
+                    : "text-[var(--color-ink-muted)]"
                 }`}
               >
                 <Icon className="h-5 w-5" />
@@ -784,7 +792,7 @@ export default function VendorDashboardPage() {
             <button
               type="button"
               onClick={() => void handleLogout()}
-              className="flex min-h-[52px] w-full flex-col items-center justify-center gap-1 rounded-xl px-1 text-[11px] font-semibold text-gray-500"
+              className="flex min-h-[52px] w-full flex-col items-center justify-center gap-1 rounded-xl px-1 text-[11px] font-semibold text-[var(--color-ink-muted)]"
             >
               <LogOut className="h-5 w-5" />
               Log out

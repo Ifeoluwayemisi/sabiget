@@ -1,13 +1,22 @@
+import { afterAll, afterEach, beforeEach, describe, expect, it, jest } from "@jest/globals";
+
+// Restored from a pre-ESM-migration CommonJS test file (see
+// vendorRoutes.endpoints.test.js for context). Assertions unchanged.
+// authController/memberAuthController are mocked wholesale here — their
+// own real logic is exercised by authController.test.js and
+// memberAuthController.test.js. Only /me (implemented inline in
+// authRoutes.js) is under test in this file.
+
 let mockCurrentUser;
 
-jest.mock("../middleware/auth", () => ({
+await jest.unstable_mockModule("../middleware/auth.js", () => ({
   authenticateToken: (req, res, next) => {
     req.user = mockCurrentUser;
     next();
   },
 }));
 
-jest.mock("../controllers/authController", () => ({
+await jest.unstable_mockModule("../controllers/authController.js", () => ({
   sendOTP: jest.fn((req, res) => res.json({ mocked: "send-otp" })),
   verifyOTP: jest.fn((req, res) => res.json({ mocked: "verify-otp" })),
   refreshAccessToken: jest.fn((req, res) =>
@@ -16,18 +25,18 @@ jest.mock("../controllers/authController", () => ({
   logout: jest.fn((req, res) => res.json({ mocked: "logout" })),
 }));
 
-jest.mock("../controllers/memberAuthController", () => ({
+await jest.unstable_mockModule("../controllers/memberAuthController.js", () => ({
   createAccount: jest.fn((req, res) => res.json({ mocked: "create-account" })),
   login: jest.fn((req, res) => res.json({ mocked: "member-login" })),
 }));
 
-jest.mock("../middleware/rateLimiter", () => ({
+await jest.unstable_mockModule("../middleware/rateLimiter.js", () => ({
   otpLimiter: (req, res, next) => next(),
   loginLimiter: (req, res, next) => next(),
 }));
 
-const { startTestServer } = require("../test/startTestServer");
-const authRouter = require("./authRoutes");
+const { startTestServer } = await import("./startTestServer.js");
+const authRouter = (await import("../routes/authRoutes.js")).default;
 
 describe("authRoutes", () => {
   let server;

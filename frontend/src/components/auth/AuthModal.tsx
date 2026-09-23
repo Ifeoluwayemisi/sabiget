@@ -96,7 +96,7 @@ export default function AuthModal({ isOpen, onClose, onSuccess, initialIntent }:
   // to this number, not the (possibly edited) input, so changing the phone
   // after AI/expired OTP always moves to a fresh code for the new number.
   const [otpSentFor, setOtpSentFor] = useState<string | null>(null);
-  const [otpHint, setOtpHint] = useState<string | null>(null);
+
   const [loading, setLoading] = useState(false);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
   const [createForm, setCreateForm] = useState({
@@ -131,7 +131,6 @@ export default function AuthModal({ isOpen, onClose, onSuccess, initialIntent }:
       setGuestEmail("");
       setOtp("");
       setOtpSentFor(null);
-      setOtpHint(null);
       setFeedback(null);
       setCreateForm({ name: "", email: "", password: "" });
       setConsentAccepted(false);
@@ -157,7 +156,6 @@ export default function AuthModal({ isOpen, onClose, onSuccess, initialIntent }:
     setStep("phone");
     setOtp("");
     setOtpSentFor(null);
-    setOtpHint(null);
     setFeedback(null);
   };
 
@@ -220,16 +218,12 @@ export default function AuthModal({ isOpen, onClose, onSuccess, initialIntent }:
       );
       setOtp("");
       setOtpSentFor(phone);
-      // In development the code arrives on the server console; surface the
-      // backend's explicit hint instead of hiding that delivery channel.
-      setOtpHint(data.hint || data.message || null);
       setStep("otp");
       setFeedback({
         type: "success",
         text: "Verification code sent.",
       });
     } catch (error) {
-      console.error("Failed to send OTP:", error);
       setFeedback({
         type: "error",
         text:
@@ -245,7 +239,7 @@ export default function AuthModal({ isOpen, onClose, onSuccess, initialIntent }:
     setLoading(true);
     setFeedback(null);
     try {
-      const data = await requestOtp(
+      await requestOtp(
         otpSentFor,
         intent === "guest"
           ? guestEmail
@@ -253,13 +247,11 @@ export default function AuthModal({ isOpen, onClose, onSuccess, initialIntent }:
             ? createForm.email.trim()
             : undefined,
       );
-      setOtpHint(data.hint || data.message || otpHint);
       setFeedback({
         type: "success",
         text: "A new verification code has been sent.",
       });
     } catch (error) {
-      console.error("Failed to resend OTP:", error);
       setFeedback({
         type: "error",
         text:
@@ -326,7 +318,6 @@ export default function AuthModal({ isOpen, onClose, onSuccess, initialIntent }:
         onSuccess?.();
       }
     } catch (error) {
-      console.error("Failed to verify OTP:", error);
       const message =
         error instanceof Error ? error.message : "Failed to verify OTP.";
       const attempts = (error as { attemptsRemaining?: number })
@@ -389,7 +380,6 @@ export default function AuthModal({ isOpen, onClose, onSuccess, initialIntent }:
       onClose();
       onSuccess?.();
     } catch (error) {
-      console.error("Failed to create account:", error);
       const message =
         error instanceof Error ? error.message : "Failed to create account.";
       // The OTP already logged this phone in as a MEMBER; avoid a confusing
@@ -410,11 +400,11 @@ export default function AuthModal({ isOpen, onClose, onSuccess, initialIntent }:
   const renderPhoneStep = () => (
     <div className="space-y-4">
       <label className="block">
-        <span className="mb-2 block text-sm font-medium text-gray-700">
+        <span className="mb-2 block text-sm font-medium text-[#5f5a57]">
           Phone number
         </span>
-        <div className="flex items-center gap-3 rounded-xl border border-gray-300 px-3 py-3 focus-within:border-orange-500">
-          <Phone className="h-4 w-4 text-gray-400" />
+        <div className="flex items-center gap-3 rounded-xl border border-[var(--color-line-strong)] px-3 py-3 focus-within:border-[#ff4500]">
+          <Phone className="h-4 w-4 text-[#8a8a8a]" />
           <input
             type="tel"
             autoComplete="tel"
@@ -437,11 +427,11 @@ export default function AuthModal({ isOpen, onClose, onSuccess, initialIntent }:
             exit="exit"
             className="block"
           >
-            <span className="mb-2 block text-sm font-medium text-gray-700">
+            <span className="mb-2 block text-sm font-medium text-[#5f5a57]">
               Email address
             </span>
-            <div className="flex items-center gap-3 rounded-xl border border-gray-300 px-3 py-3 focus-within:border-orange-500">
-              <Mail className="h-4 w-4 text-gray-400" />
+            <div className="flex items-center gap-3 rounded-xl border border-[var(--color-line-strong)] px-3 py-3 focus-within:border-[#ff4500]">
+              <Mail className="h-4 w-4 text-[#8a8a8a]" />
               <input
                 type="email"
                 autoComplete="email"
@@ -456,7 +446,7 @@ export default function AuthModal({ isOpen, onClose, onSuccess, initialIntent }:
                 placeholder="you@email.com"
               />
             </div>
-            <span className="mt-1 block text-xs text-gray-400">
+            <span className="mt-1 block text-xs text-[#8a8a8a]">
               Your account will use this email. Also used to deliver your
               verification code if WhatsApp is unavailable.
             </span>
@@ -470,7 +460,7 @@ export default function AuthModal({ isOpen, onClose, onSuccess, initialIntent }:
             initial="hidden"
             animate="visible"
             exit="exit"
-            className="flex items-start gap-3 rounded-xl border border-gray-300 bg-gray-50 px-3 py-3"
+            className="flex items-start gap-3 rounded-xl border border-[var(--color-line-strong)] bg-[var(--color-surface)] px-3 py-3"
           >
             <input
               type="checkbox"
@@ -478,15 +468,15 @@ export default function AuthModal({ isOpen, onClose, onSuccess, initialIntent }:
               onChange={(event) => setConsentAccepted(event.target.checked)}
               aria-required="true"
               required
-              className="mt-0.5 h-5 w-5 shrink-0 rounded border-gray-300 text-orange-500 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2"
+              className="mt-0.5 h-5 w-5 shrink-0 rounded border-[var(--color-line-strong)] text-[#ff4500] focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2"
             />
-            <span className="text-xs leading-relaxed text-gray-600">
+            <span className="text-xs leading-relaxed text-[#5f5a57]">
               I agree to SabiGet&apos;s{" "}
               <Link
                 href="/terms"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="font-semibold text-orange-500 hover:underline"
+                className="font-semibold text-[#ff4500] hover:underline"
               >
                 Terms &amp; Conditions
               </Link>{" "}
@@ -495,7 +485,7 @@ export default function AuthModal({ isOpen, onClose, onSuccess, initialIntent }:
                 href="/privacy"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="font-semibold text-orange-500 hover:underline"
+                className="font-semibold text-[#ff4500] hover:underline"
               >
                 Privacy Policy
               </Link>
@@ -513,11 +503,11 @@ export default function AuthModal({ isOpen, onClose, onSuccess, initialIntent }:
             exit="exit"
             className="block"
           >
-            <span className="mb-2 block text-sm font-medium text-gray-700">
+            <span className="mb-2 block text-sm font-medium text-[#5f5a57]">
               Email (optional)
             </span>
-            <div className="flex items-center gap-3 rounded-xl border border-gray-300 px-3 py-3 focus-within:border-orange-500">
-              <Mail className="h-4 w-4 text-gray-400" />
+            <div className="flex items-center gap-3 rounded-xl border border-[var(--color-line-strong)] px-3 py-3 focus-within:border-[#ff4500]">
+              <Mail className="h-4 w-4 text-[#8a8a8a]" />
               <input
                 type="email"
                 autoComplete="email"
@@ -527,7 +517,7 @@ export default function AuthModal({ isOpen, onClose, onSuccess, initialIntent }:
                 placeholder="you@email.com"
               />
             </div>
-            <span className="mt-1 block text-xs text-gray-400">
+            <span className="mt-1 block text-xs text-[#8a8a8a]">
               Used if we cannot reach you on WhatsApp.
             </span>
           </motion.label>
@@ -537,7 +527,7 @@ export default function AuthModal({ isOpen, onClose, onSuccess, initialIntent }:
       <button
         onClick={handleSendOtp}
         disabled={loading}
-        className="w-full rounded-xl bg-orange-500 px-4 py-3 text-sm font-bold text-white disabled:bg-gray-300"
+        className="sabiget-punch w-full rounded-2xl px-4 py-3 text-sm font-bold text-white disabled:bg-[#f1edea] disabled:text-[#8a8a8a]"
       >
         {loading ? "Sending..." : "Send verification code"}
       </button>
@@ -549,7 +539,7 @@ export default function AuthModal({ isOpen, onClose, onSuccess, initialIntent }:
           setStep("choose");
           setFeedback(null);
         }}
-        className="flex w-full items-center justify-center gap-1 rounded-xl px-4 py-2 text-sm font-medium text-gray-500 hover:text-gray-700"
+        className="flex w-full items-center justify-center gap-1 rounded-xl px-4 py-2 text-sm font-medium text-[#8a8a8a] hover:text-[#5f5a57]"
       >
         <ArrowLeft className="h-4 w-4" />
         Back
@@ -559,23 +549,17 @@ export default function AuthModal({ isOpen, onClose, onSuccess, initialIntent }:
 
   const renderOtpStep = () => (
     <div className="space-y-4">
-      <p className="text-sm text-gray-500">
+      <p className="text-sm text-[#8a8a8a]">
         We sent a verification code to{" "}
-        <span className="font-semibold text-gray-900">{otpSentFor}</span>.
+        <span className="font-semibold text-[#111111]">{otpSentFor}</span>.
       </p>
 
-      {otpHint && (
-        <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
-          {otpHint}
-        </p>
-      )}
-
       <label className="block">
-        <span className="mb-2 block text-sm font-medium text-gray-700">
+        <span className="mb-2 block text-sm font-medium text-[#5f5a57]">
           Enter verification code
         </span>
-        <div className="flex items-center gap-3 rounded-xl border border-gray-300 px-3 py-3 focus-within:border-orange-500">
-          <Lock className="h-4 w-4 text-gray-400" />
+        <div className="flex items-center gap-3 rounded-xl border border-[var(--color-line-strong)] px-3 py-3 focus-within:border-[#ff4500]">
+          <Lock className="h-4 w-4 text-[#8a8a8a]" />
           <input
             type="text"
             inputMode="numeric"
@@ -592,16 +576,16 @@ export default function AuthModal({ isOpen, onClose, onSuccess, initialIntent }:
       <button
         onClick={handleVerifyOtp}
         disabled={loading}
-        className="w-full rounded-xl bg-orange-500 px-4 py-3 text-sm font-bold text-white disabled:bg-gray-300"
+        className="sabiget-punch w-full rounded-2xl px-4 py-3 text-sm font-bold text-white disabled:bg-[#f1edea] disabled:text-[#8a8a8a]"
       >
         {loading ? "Verifying..." : "Verify & Continue"}
       </button>
 
-      <div className="flex items-center justify-between rounded-xl bg-gray-50 px-3 py-2 text-sm">
+      <div className="flex items-center justify-between rounded-xl bg-[var(--color-surface)] px-3 py-2 text-sm">
         <button
           type="button"
           onClick={goToPhone}
-          className="flex items-center gap-1 font-medium text-gray-500 hover:text-gray-700"
+          className="flex items-center gap-1 font-medium text-[#8a8a8a] hover:text-[#5f5a57]"
         >
           <ArrowLeft className="h-4 w-4" />
           Change phone number
@@ -610,7 +594,7 @@ export default function AuthModal({ isOpen, onClose, onSuccess, initialIntent }:
           type="button"
           onClick={handleResendOtp}
           disabled={loading}
-          className="font-medium text-orange-500 disabled:text-gray-300"
+          className="font-medium text-[#ff4500] disabled:text-gray-300"
         >
           Resend code
         </button>
@@ -621,11 +605,11 @@ export default function AuthModal({ isOpen, onClose, onSuccess, initialIntent }:
   const renderDetailsStep = () => (
     <div className="space-y-4">
       <label className="block">
-        <span className="mb-2 block text-sm font-medium text-gray-700">
+        <span className="mb-2 block text-sm font-medium text-[#5f5a57]">
           Full name
         </span>
-        <div className="flex items-center gap-3 rounded-xl border border-gray-300 px-3 py-3 focus-within:border-orange-500">
-          <User className="h-4 w-4 text-gray-400" />
+        <div className="flex items-center gap-3 rounded-xl border border-[var(--color-line-strong)] px-3 py-3 focus-within:border-[#ff4500]">
+          <User className="h-4 w-4 text-[#8a8a8a]" />
           <input
             type="text"
             autoComplete="name"
@@ -640,11 +624,11 @@ export default function AuthModal({ isOpen, onClose, onSuccess, initialIntent }:
       </label>
 
       <label className="block">
-        <span className="mb-2 block text-sm font-medium text-gray-700">
+        <span className="mb-2 block text-sm font-medium text-[#5f5a57]">
           Email
         </span>
-        <div className="flex items-center gap-3 rounded-xl border border-gray-300 px-3 py-3 focus-within:border-orange-500">
-          <Mail className="h-4 w-4 text-gray-400" />
+        <div className="flex items-center gap-3 rounded-xl border border-[var(--color-line-strong)] px-3 py-3 focus-within:border-[#ff4500]">
+          <Mail className="h-4 w-4 text-[#8a8a8a]" />
           <input
             type="email"
             autoComplete="email"
@@ -659,11 +643,11 @@ export default function AuthModal({ isOpen, onClose, onSuccess, initialIntent }:
       </label>
 
       <label className="block">
-        <span className="mb-2 block text-sm font-medium text-gray-700">
+        <span className="mb-2 block text-sm font-medium text-[#5f5a57]">
           Password
         </span>
-        <div className="flex items-center gap-3 rounded-xl border border-gray-300 px-3 py-3 focus-within:border-orange-500">
-          <Lock className="h-4 w-4 text-gray-400" />
+        <div className="flex items-center gap-3 rounded-xl border border-[var(--color-line-strong)] px-3 py-3 focus-within:border-[#ff4500]">
+          <Lock className="h-4 w-4 text-[#8a8a8a]" />
           <input
             type="password"
             autoComplete="new-password"
@@ -678,7 +662,7 @@ export default function AuthModal({ isOpen, onClose, onSuccess, initialIntent }:
             placeholder="At least 8 characters"
           />
         </div>
-        <span className="mt-1 block text-xs text-gray-400">
+        <span className="mt-1 block text-xs text-[#8a8a8a]">
           {"You'll use this to sign in next time."}
         </span>
       </label>
@@ -686,7 +670,7 @@ export default function AuthModal({ isOpen, onClose, onSuccess, initialIntent }:
       <button
         onClick={handleCreateAccount}
         disabled={loading}
-        className="w-full rounded-xl bg-orange-500 px-4 py-3 text-sm font-bold text-white disabled:bg-gray-300"
+        className="sabiget-punch w-full rounded-2xl px-4 py-3 text-sm font-bold text-white disabled:bg-[#f1edea] disabled:text-[#8a8a8a]"
       >
         {loading ? "Creating account..." : "Create account"}
       </button>
@@ -694,7 +678,7 @@ export default function AuthModal({ isOpen, onClose, onSuccess, initialIntent }:
       <button
         type="button"
         onClick={goToPhone}
-        className="flex w-full items-center justify-center gap-1 rounded-xl px-4 py-2 text-sm font-medium text-gray-500 hover:text-gray-700"
+        className="flex w-full items-center justify-center gap-1 rounded-xl px-4 py-2 text-sm font-medium text-[#8a8a8a] hover:text-[#5f5a57]"
       >
         <ArrowLeft className="h-4 w-4" />
         Change phone number
@@ -719,7 +703,7 @@ export default function AuthModal({ isOpen, onClose, onSuccess, initialIntent }:
             role="dialog"
             aria-modal="true"
             aria-label={intent ? INTENT_COPY[intent].title : "SabiGet access"}
-            className="fixed left-1/2 top-1/2 z-50 max-h-[90vh] w-[92%] max-w-md -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-2xl bg-white p-5 shadow-2xl"
+            className="fixed left-1/2 top-1/2 z-50 max-h-[90vh] w-[92%] max-w-md -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-2xl bg-white p-5 shadow-[0_24px_48px_-12px_rgba(0,0,0,0.25)]"
             variants={modalVariants}
             initial="hidden"
             animate="visible"
@@ -727,10 +711,10 @@ export default function AuthModal({ isOpen, onClose, onSuccess, initialIntent }:
           >
             <div className="flex items-start justify-between">
               <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-orange-500">
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#ff4500]">
                   {intent && step !== "choose" ? "SabiGet" : "Welcome"}
                 </p>
-                <h2 className="mt-1 text-2xl font-bold text-gray-900">
+                <h2 className="mt-1 text-xl font-extrabold text-[#111111]">
                   {intent && step !== "choose"
                     ? INTENT_COPY[intent].title
                     : "Continue to SabiGet"}
@@ -739,7 +723,7 @@ export default function AuthModal({ isOpen, onClose, onSuccess, initialIntent }:
               <button
                 onClick={onClose}
                 aria-label="Close"
-                className="rounded-full p-2 text-gray-500 hover:bg-gray-100"
+                className="rounded-full p-2 text-[#8a8a8a] hover:bg-[var(--color-surface)]"
               >
                 <X className="h-5 w-5" />
               </button>
@@ -758,16 +742,16 @@ export default function AuthModal({ isOpen, onClose, onSuccess, initialIntent }:
                   <button
                     type="button"
                     onClick={() => chooseIntent("signin")}
-                    className="group flex w-full items-center gap-3 rounded-xl border border-gray-200 px-4 py-3 text-left hover:border-orange-500"
+                    className="group flex w-full items-center gap-3 rounded-2xl border border-[var(--color-line)] px-4 py-3 text-left hover:border-[#ff4500]"
                   >
-                    <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-orange-50 text-orange-500 group-hover:bg-orange-100">
+                    <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#ffefe8] text-[#ff4500] group-hover:bg-orange-100">
                       <LogIn className="h-5 w-5" />
                     </span>
                     <span>
-                      <span className="block text-sm font-bold text-gray-900">
+                      <span className="block text-sm font-bold text-[#111111]">
                         Sign in
                       </span>
-                      <span className="block text-xs text-gray-500">
+                      <span className="block text-xs text-[#8a8a8a]">
                         I already have a SabiGet account.
                       </span>
                     </span>
@@ -776,16 +760,16 @@ export default function AuthModal({ isOpen, onClose, onSuccess, initialIntent }:
                   <button
                     type="button"
                     onClick={() => chooseIntent("create")}
-                    className="group flex w-full items-center gap-3 rounded-xl border border-gray-200 px-4 py-3 text-left hover:border-orange-500"
+                    className="group flex w-full items-center gap-3 rounded-2xl border border-[var(--color-line)] px-4 py-3 text-left hover:border-[#ff4500]"
                   >
-                    <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-orange-50 text-orange-500 group-hover:bg-orange-100">
+                    <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#ffefe8] text-[#ff4500] group-hover:bg-orange-100">
                       <UserPlus className="h-5 w-5" />
                     </span>
                     <span>
-                      <span className="block text-sm font-bold text-gray-900">
+                      <span className="block text-sm font-bold text-[#111111]">
                         Create account
                       </span>
-                      <span className="block text-xs text-gray-500">
+                      <span className="block text-xs text-[#8a8a8a]">
                         Save my orders, earn rewards, and sign in faster.
                       </span>
                     </span>
@@ -794,27 +778,27 @@ export default function AuthModal({ isOpen, onClose, onSuccess, initialIntent }:
                   <button
                     type="button"
                     onClick={() => chooseIntent("guest")}
-                    className="group flex w-full items-center gap-3 rounded-xl border border-gray-200 px-4 py-3 text-left hover:border-orange-500"
+                    className="group flex w-full items-center gap-3 rounded-2xl border border-[var(--color-line)] px-4 py-3 text-left hover:border-[#ff4500]"
                   >
-                    <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-orange-50 text-orange-500 group-hover:bg-orange-100">
+                    <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#ffefe8] text-[#ff4500] group-hover:bg-orange-100">
                       <ShoppingBag className="h-5 w-5" />
                     </span>
                     <span>
-                      <span className="block text-sm font-bold text-gray-900">
+                      <span className="block text-sm font-bold text-[#111111]">
                         Continue as a guest
                       </span>
-                      <span className="block text-xs text-gray-500">
+                      <span className="block text-xs text-[#8a8a8a]">
                         Shop now; you can create an account later.
                       </span>
                     </span>
                   </button>
 
-                  <p className="pt-2 text-center text-sm text-gray-500">
+                  <p className="pt-2 text-center text-sm text-[#8a8a8a]">
                     Run a restaurant?{" "}
                     <Link
                       href="/vendor/dashboard"
                       onClick={onClose}
-                      className="font-semibold text-orange-500 hover:underline"
+                      className="font-semibold text-[#ff4500] hover:underline"
                     >
                       Become a SabiGet vendor
                     </Link>
@@ -832,7 +816,7 @@ export default function AuthModal({ isOpen, onClose, onSuccess, initialIntent }:
                   className="mt-5"
                 >
                   {intent && (
-                    <p className="mb-4 text-sm text-gray-500">
+                    <p className="mb-4 text-sm text-[#8a8a8a]">
                       {INTENT_COPY[intent].caption}
                     </p>
                   )}
@@ -862,7 +846,7 @@ export default function AuthModal({ isOpen, onClose, onSuccess, initialIntent }:
                   exit="exit"
                   className="mt-5"
                 >
-                  <p className="mb-4 text-sm text-gray-500">
+                  <p className="mb-4 text-sm text-[#8a8a8a]">
                     One last step — choose your account details.
                   </p>
                   {renderDetailsStep()}

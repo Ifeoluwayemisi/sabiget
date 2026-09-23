@@ -31,12 +31,48 @@ export interface ProductPayload {
   price: number;
   description?: string;
   category?: string;
-  imageUrl?: string;
+  imageUrl?: string | null;
   isAvailable?: boolean;
+  preparationTime?: number;
+  stockQuantity?: number | null;
 }
 
 /** PATCH accepts any subset of fields; the backend only updates provided keys. */
 export type ProductUpdatePayload = Partial<ProductPayload>;
+
+interface ProductImageUploadResponse {
+  upload?: {
+    uploadUrl: string;
+    imageUrl: string;
+  };
+}
+
+export async function uploadProductImage(file: File): Promise<string> {
+  const response = await apiRequest("/products/image-upload", {
+    method: "POST",
+    body: JSON.stringify({
+      contentType: file.type,
+      size: file.size,
+    }),
+  });
+  if (!response.ok) throw new Error(await parseBackendError(response));
+
+  const data = (await response.json()) as ProductImageUploadResponse;
+  if (!data.upload?.uploadUrl || !data.upload.imageUrl) {
+    throw new Error("The image upload service returned an invalid response.");
+  }
+
+  const uploadResponse = await fetch(data.upload.uploadUrl, {
+    method: "PUT",
+    headers: { "Content-Type": file.type },
+    body: file,
+  });
+  if (!uploadResponse.ok) {
+    throw new Error("Image upload failed. Please try again.");
+  }
+
+  return data.upload.imageUrl;
+}
 
 async function parseBackendError(response: Response): Promise<string> {
   try {

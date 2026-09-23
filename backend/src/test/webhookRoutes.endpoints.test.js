@@ -1,14 +1,19 @@
-const express = require("express");
-const { startTestServer } = require("../test/startTestServer");
+import { afterAll, afterEach, beforeEach, describe, expect, it, jest } from "@jest/globals";
 
-jest.mock("../utils/paystack", () => ({
-  verifyWebhookSignature: jest.fn(() => true),
+// Restored from a pre-ESM-migration CommonJS test file (see
+// vendorRoutes.endpoints.test.js for context). Assertions unchanged.
+// Complements order_product_webhook.endpoints.test.js's webhook coverage.
+
+const verifyWebhookSignature = jest.fn(() => true);
+
+await jest.unstable_mockModule("../utils/paystack.js", () => ({
+  verifyWebhookSignature,
 }));
 
-const { verifyWebhookSignature } = require("../utils/paystack");
-const webhookRouter = require("./webhookRoutes");
+const { startTestServer } = await import("./startTestServer.js");
+const webhookRouter = (await import("../routes/webhookRoutes.js")).default;
 
-describe("webhookRoutes", () => {
+describe("webhookRoutes (legacy suite)", () => {
   let server;
   let prisma;
   let io;

@@ -121,7 +121,7 @@ router.post("/guest-checkout", checkoutLimiter, async (req, res) => {
       where: { id: vendorId },
     });
 
-    if (!vendor) {
+    if (!vendor || vendor.isActive === false || vendor.isVerified === false) {
       return res
         .status(404)
         .json({ success: false, error: "Vendor not found" });
@@ -138,10 +138,26 @@ router.post("/guest-checkout", checkoutLimiter, async (req, res) => {
     const orderItemsData = [];
 
     for (const item of items) {
+      if (
+        !item ||
+        !Number.isInteger(item.quantity) ||
+        item.quantity < 1 ||
+        item.quantity > 100
+      ) {
+        return res.status(400).json({
+          success: false,
+          error: "Each item quantity must be a whole number between 1 and 100",
+        });
+      }
       const product = await global.prisma.Product.findUnique({
         where: { id: item.productId },
       });
-      if (!product || product.vendorId !== vendor.id || !product.isAvailable) {
+      if (
+        !product ||
+        product.vendorId !== vendor.id ||
+        !product.isAvailable ||
+        (product.stockQuantity !== null && product.stockQuantity < item.quantity)
+      ) {
         return res.status(400).json({
           success: false,
           error: `Product ${item.productId} is invalid or unavailable`,
@@ -342,7 +358,7 @@ router.post("/", checkoutLimiter, authenticateToken, async (req, res) => {
     if (!user) {
       return res.status(404).json({ success: false, error: "User not found" });
     }
-    if (!vendor) {
+    if (!vendor || vendor.isActive === false || vendor.isVerified === false) {
       return res
         .status(404)
         .json({ success: false, error: "Vendor not found" });
@@ -358,10 +374,26 @@ router.post("/", checkoutLimiter, authenticateToken, async (req, res) => {
     const orderItemsData = [];
 
     for (const item of items) {
+      if (
+        !item ||
+        !Number.isInteger(item.quantity) ||
+        item.quantity < 1 ||
+        item.quantity > 100
+      ) {
+        return res.status(400).json({
+          success: false,
+          error: "Each item quantity must be a whole number between 1 and 100",
+        });
+      }
       const product = await global.prisma.Product.findUnique({
         where: { id: item.productId },
       });
-      if (!product || product.vendorId !== vendor.id || !product.isAvailable) {
+      if (
+        !product ||
+        product.vendorId !== vendor.id ||
+        !product.isAvailable ||
+        (product.stockQuantity !== null && product.stockQuantity < item.quantity)
+      ) {
         return res.status(400).json({
           success: false,
           error: `Product ${item.productId} is invalid or unavailable`,
@@ -1052,6 +1084,8 @@ router.post(
           success: false,
           error:
             "DVC verification is locked due to too many failed attempts. Please contact support.",
+          locked: true,
+          lockedUntil: order.dvcLockedUntil,
         });
       }
 
@@ -1083,9 +1117,36 @@ router.post(
           });
         }
 
-        return res
-          .status(400)
-          .json({ success: false, error: "Invalid DVC code" });
+        // Re-read authoritative state so the response reflects exactly what
+        // was persisted (including a lock just set by this or a concurrent
+        // request) — display-only, no change to the verification/lockout
+        // logic itself.
+        const finalState = await global.prisma.Order.findUnique({
+          where: { id },
+          select: { dvcAttempts: true, dvcLockedUntil: true },
+        });
+
+        if (finalState?.dvcLockedUntil && finalState.dvcLockedUntil > new Date()) {
+          return res.status(403).json({
+            success: false,
+            error:
+              "DVC verification is locked due to too many failed attempts. Please contact support.",
+            locked: true,
+            lockedUntil: finalState.dvcLockedUntil,
+          });
+        }
+
+        const attemptsRemaining = Math.max(
+          0,
+          config.dvc.maxAttempts -
+            (finalState?.dvcAttempts ?? attemptsSnapshot?.dvcAttempts ?? 0),
+        );
+
+        return res.status(400).json({
+          success: false,
+          error: "Invalid DVC code",
+          attemptsRemaining,
+        });
       }
 
       const delivered = await global.prisma.Order.updateMany({

@@ -30,7 +30,8 @@ export default function VendorCard({ vendor, onSelect }: VendorCardProps) {
           </div>
         )}
 
-        <span className="absolute left-3 top-3 inline-flex items-center rounded-full bg-white/95 px-3 py-1 text-xs font-semibold tracking-wide text-[#5f5a57] shadow-sm">
+        <span className="absolute left-3 top-3 inline-flex items-center gap-1 rounded-full bg-white/95 px-2.5 py-1 text-[11px] font-semibold tracking-wide text-[#5f5a57] shadow-sm">
+          <MapPin className="h-3 w-3 text-[#ff4500]" aria-hidden="true" />
           {category}
         </span>
       </div>
@@ -57,7 +58,11 @@ export default function VendorCard({ vendor, onSelect }: VendorCardProps) {
         <div className="mt-auto flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-[#666666]">
           <span className="inline-flex items-center gap-1.5">
             <MapPin className="h-4 w-4 text-[#ff4500]" aria-hidden="true" />
-            {distanceKm > 0 ? `${distanceKm.toFixed(1)} km away` : "Nearby"}
+            {distanceKm === null
+              ? "Distance unavailable"
+              : distanceKm > 0
+                ? `${distanceKm.toFixed(1)} km away`
+                : "Nearby"}
           </span>
           {deliveryMinutes !== null && (
             <span className="inline-flex items-center gap-1.5">

@@ -1,6 +1,17 @@
+import { afterAll, afterEach, beforeEach, describe, expect, it, jest } from "@jest/globals";
+
+// Restored from a pre-ESM-migration CommonJS test file (see
+// vendorRoutes.endpoints.test.js for context). Assertions unchanged.
+// Complements (does not duplicate) customer.endpoints.test.js, which covers
+// a different set of customerRoutes.js scenarios (reviews, RBAC, etc).
+
 let mockCurrentUser;
 
-jest.mock("../middleware/auth", () => ({
+const createMemberAccountService = jest.fn();
+const findNearbyVendors = jest.fn();
+const isValidCoordinates = jest.fn(() => true);
+
+await jest.unstable_mockModule("../middleware/auth.js", () => ({
   authenticateToken: (req, res, next) => {
     req.user = mockCurrentUser;
     next();
@@ -9,26 +20,41 @@ jest.mock("../middleware/auth", () => ({
     req.user = mockCurrentUser;
     next();
   },
+  authorize:
+    (...roles) =>
+    (req, res, next) => {
+      if (!req.user || !roles.includes(req.user.role)) {
+        return res.status(403).json({ success: false, error: "Forbidden" });
+      }
+      next();
+    },
 }));
 
-jest.mock("../services/memberAuthService", () => ({
-  createMemberAccountService: jest.fn(),
+await jest.unstable_mockModule("../services/memberAuthService.js", () => ({
+  createMemberAccountService,
 }));
 
-jest.mock("../utils/location", () => ({
-  findNearbyVendors: jest.fn(),
-  isValidCoordinates: jest.fn(() => true),
-}));
-
-const { startTestServer } = require("../test/startTestServer");
-const { createMemberAccountService } = require("../services/memberAuthService");
-const {
+await jest.unstable_mockModule("../utils/location.js", () => ({
   findNearbyVendors,
   isValidCoordinates,
-} = require("../utils/location");
-const customerRouter = require("./customerRoutes");
+}));
 
-describe("customerRoutes", () => {
+// customerRoutes.js also imports customerService.js, which itself imports
+// calculateDistance from utils/location.js — mocking that module wholesale
+// (matching customer.endpoints.test.js's approach) avoids re-implementing
+// its math here and keeps this suite focused on the route layer.
+await jest.unstable_mockModule("../services/customerService.js", () => ({
+  redeemLoyaltyPoints: jest.fn(),
+  getLoyaltyTier: (orderCount) => (orderCount >= 4 ? "LOYAL" : "STANDARD"),
+  getPointsEarningRate: (orderCount) => (orderCount < 3 ? 0.05 : 0.02),
+  getCustomerInsights: jest.fn(),
+  getRecommendedVendors: jest.fn(),
+}));
+
+const { startTestServer } = await import("./startTestServer.js");
+const customerRouter = (await import("../routes/customerRoutes.js")).default;
+
+describe("customerRoutes (legacy suite)", () => {
   let server;
   let prisma;
 
@@ -154,6 +180,7 @@ describe("customerRoutes", () => {
       totalReviews: 8,
       lga: "YABA",
       isActive: true,
+      isVerified: true,
       metrics: {
         avgPreparationTime: 18,
       },

@@ -185,7 +185,7 @@ function PaymentStatusView({
           <>
             <button
               onClick={openPayment}
-              className="mt-6 flex items-center gap-2 rounded-xl bg-[#ff4500] px-6 py-3 text-sm font-bold text-white hover:bg-[#e63d00]"
+              className="sabiget-punch flex items-center gap-2 rounded-2xl px-6 py-3 text-sm font-bold text-white"
             >
               <ExternalLink className="h-4 w-4" />
               Open Paystack to pay
@@ -207,7 +207,7 @@ function PaymentStatusView({
 
       <button
         onClick={onDone}
-        className="mt-5 w-full rounded-xl border border-[var(--color-line-strong)] px-4 py-3 text-sm font-semibold text-[#111111] hover:bg-[#fff2ea]"
+        className="mt-5 w-full rounded-2xl border border-[var(--color-line-strong)] px-4 py-3 text-sm font-semibold text-[#111111] hover:bg-[#fff2ea]"
       >
         {isGuest ? "Track on this device" : "Done"}
       </button>
@@ -370,7 +370,6 @@ export default function CheckoutPanel({
 
       cart.clearCart();
     } catch (error) {
-      console.error("Checkout failed:", error);
       setFeedback({
         kind: "error",
         text:
@@ -405,9 +404,14 @@ export default function CheckoutPanel({
 
       {cart.lines.length === 0 ? (
         <div className="flex flex-col items-center py-14 text-center">
-          <ShoppingCart className="h-10 w-10 text-[#ffb38f]" />
-          <p className="mt-3 text-sm text-[var(--color-ink-muted)]">
-            Your cart is empty. Add something from the menu to get started.
+          <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[#ffefe8]">
+            <ShoppingCart className="h-7 w-7 text-[#e63d00]" />
+          </span>
+          <h3 className="mt-4 text-lg font-bold text-[#111111]">
+            Your cart is empty
+          </h3>
+          <p className="mt-2 text-sm leading-relaxed text-[#666666]">
+            Add something from the menu to get started.
           </p>
         </div>
       ) : (
@@ -551,15 +555,15 @@ export default function CheckoutPanel({
             <button
               onClick={handleCheckout}
               disabled={submitting || cart.lines.length === 0}
-              className="w-full rounded-xl bg-[#ff4500] px-4 py-3 text-sm font-bold text-white hover:bg-[#e63d00] disabled:cursor-not-allowed disabled:bg-[#f1edea] disabled:text-[#8a8a8a]"
+              className="sabiget-punch flex w-full items-center justify-center rounded-2xl px-4 py-3.5 text-sm font-bold text-white disabled:cursor-not-allowed disabled:bg-[#f1edea] disabled:text-[#8a8a8a]"
             >
               {submitting
                 ? "Placing order…"
                 : `Place order • ${formatNaira(estimatedTotal)}`}
             </button>
             <p className="mt-2 text-center text-xs text-[#8a8a8a]">
-You&apos;ll complete payment securely with Paystack after placing the
-          order.
+              You&apos;ll complete payment securely with Paystack after placing the
+              order.
             </p>
           </div>
         </>

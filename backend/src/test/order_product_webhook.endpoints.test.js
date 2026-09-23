@@ -55,6 +55,7 @@ describe("product, order, and webhook endpoint verification", () => {
       Product: {
         findMany: jest.fn(),
         findUnique: jest.fn(),
+        findFirst: jest.fn(),
         create: jest.fn(),
         update: jest.fn(),
         delete: jest.fn(),
@@ -106,9 +107,9 @@ describe("product, order, and webhook endpoint verification", () => {
     mockCurrentUser = { userId: "user_1", role: "VENDOR" };
     prisma.Product.findMany.mockResolvedValue([{ id: "p1" }]);
     prisma.Product.findUnique
-      .mockResolvedValueOnce({ id: "p1", vendor: { id: "v1" } })
       .mockResolvedValueOnce({ id: "p1", vendorId: "vendor_1" })
       .mockResolvedValueOnce({ id: "p1", vendorId: "vendor_1" });
+    prisma.Product.findFirst.mockResolvedValue({ id: "p1", vendor: { id: "v1" } });
     prisma.Vendor.findUnique.mockResolvedValue({ id: "vendor_1", userId: "user_1" });
     prisma.Product.create.mockResolvedValue({ id: "p_new" });
     prisma.Product.update.mockResolvedValue({ id: "p1", name: "Updated" });

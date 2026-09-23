@@ -51,13 +51,18 @@ function MenuErrorState({
 }) {
   return (
     <div className="flex flex-col items-center px-5 py-16 text-center">
-      <ShoppingCart className="h-10 w-10 text-[#ffb38f]" />
-      <p className="mt-3 max-w-xs text-sm text-[var(--color-ink-muted)]">
+      <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[#fff4ec]">
+        <ShoppingCart className="h-7 w-7 text-[#b3400f]" />
+      </span>
+      <h3 className="mt-4 text-lg font-bold text-[#111111]">
+        Couldn&apos;t load menu
+      </h3>
+      <p className="mt-2 max-w-xs text-sm leading-relaxed text-[#666666]">
         {message ?? "We couldn't load this vendor's menu. Please try again."}
       </p>
       <button
         onClick={onRetry}
-        className="mt-5 rounded-xl bg-[#ff4500] px-5 py-2.5 text-sm font-bold text-white hover:bg-[#e63d00]"
+        className="mt-5 inline-flex items-center gap-2 rounded-full bg-[#ff4500] px-6 py-3 text-sm font-bold text-white shadow-[0_8px_24px_-6px_rgba(255,69,0,0.5)] transition-all duration-200 hover:-translate-y-0.5 hover:bg-[#e63d00]"
       >
         Retry
       </button>
@@ -68,8 +73,13 @@ function MenuErrorState({
 function EmptyMenuState() {
   return (
     <div className="flex flex-col items-center px-5 py-16 text-center">
-      <ShoppingCart className="h-10 w-10 text-[#ffb38f]" />
-      <p className="mt-3 text-sm text-[var(--color-ink-muted)]">
+      <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[#ffefe8]">
+        <ShoppingCart className="h-7 w-7 text-[#e63d00]" />
+      </span>
+      <h3 className="mt-4 text-lg font-bold text-[#111111]">
+        No items available
+      </h3>
+      <p className="mt-2 text-sm leading-relaxed text-[#666666]">
         No items are available from this vendor right now.
       </p>
     </div>
@@ -116,7 +126,6 @@ export default function MenuModal({
         setMenuState("success");
       } catch (error) {
         if (cancelled) return;
-        console.error("Failed to load menu:", error);
         setMenuState("error");
         setMenuError(
           error instanceof VendorMenuError

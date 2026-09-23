@@ -1,16 +1,27 @@
-jest.mock("../services/authService", () => ({
-  sendOTPService: jest.fn(),
-  verifyOTPService: jest.fn(),
+import { afterAll, beforeEach, describe, expect, it, jest } from "@jest/globals";
+
+// Restored from a pre-ESM-migration CommonJS test file (was excluded from
+// the run entirely because `require`/`jest.mock` fail under native-ESM
+// Jest). Unit-style: calls controller exports directly with hand-built
+// req/res, converted to jest.unstable_mockModule + dynamic import.
+// Assertions unchanged.
+
+const sendOTPService = jest.fn();
+const verifyOTPService = jest.fn();
+const generateAccessToken = jest.fn(() => "new_access_token");
+const verifyRefreshToken = jest.fn();
+
+await jest.unstable_mockModule("../services/authService.js", () => ({
+  sendOTPService,
+  verifyOTPService,
 }));
 
-jest.mock("../utils/jwt", () => ({
-  generateAccessToken: jest.fn(() => "new_access_token"),
-  verifyRefreshToken: jest.fn(),
+await jest.unstable_mockModule("../utils/jwt.js", () => ({
+  generateAccessToken,
+  verifyRefreshToken,
 }));
 
-const { sendOTPService, verifyOTPService } = require("../services/authService");
-const { verifyRefreshToken } = require("../utils/jwt");
-const authController = require("./authController");
+const authController = await import("../controllers/authController.js");
 
 function createRes() {
   return {

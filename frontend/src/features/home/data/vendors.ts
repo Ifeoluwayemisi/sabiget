@@ -4,7 +4,7 @@ export type VendorCardData = {
   image: string | null;
   rating: number | null;
   reviews: number;
-  distanceKm: number;
+  distanceKm: number | null;
   deliveryMinutes: number | null;
   category: string;
 };
@@ -36,7 +36,7 @@ export function mapNearbyVendor(record: Record<string, unknown>): VendorCardData
     image: asNonEmptyString(record.bannerImage) ?? asNonEmptyString(record.logo),
     rating: rawRating !== null && rawRating > 0 ? rawRating : null,
     reviews: Math.max(0, Math.floor(asNumber(record.totalReviews) ?? 0)),
-    distanceKm: Math.max(0, asNumber(record.distanceKm) ?? 0),
+    distanceKm: asNumber(record.distanceKm),
     deliveryMinutes:
       rawMinutes !== null && rawMinutes > 0 ? Math.round(rawMinutes) : null,
     category: asNonEmptyString(record.lga) ?? "Local",

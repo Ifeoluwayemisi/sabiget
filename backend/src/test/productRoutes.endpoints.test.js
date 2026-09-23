@@ -1,6 +1,11 @@
+import { afterAll, afterEach, beforeEach, describe, expect, it, jest } from "@jest/globals";
+
+// Restored from a pre-ESM-migration CommonJS test file (see
+// vendorRoutes.endpoints.test.js for context). Assertions unchanged.
+
 let mockCurrentUser;
 
-jest.mock("../middleware/auth", () => ({
+await jest.unstable_mockModule("../middleware/auth.js", () => ({
   authenticateToken: (req, res, next) => {
     req.user = mockCurrentUser;
     next();
@@ -15,8 +20,8 @@ jest.mock("../middleware/auth", () => ({
     },
 }));
 
-const { startTestServer } = require("../test/startTestServer");
-const productRouter = require("./productRoutes");
+const { startTestServer } = await import("./startTestServer.js");
+const productRouter = (await import("../routes/productRoutes.js")).default;
 
 describe("productRoutes", () => {
   let server;
@@ -28,6 +33,7 @@ describe("productRoutes", () => {
       Product: {
         findMany: jest.fn(),
         findUnique: jest.fn(),
+        findFirst: jest.fn(),
         create: jest.fn(),
         update: jest.fn(),
         delete: jest.fn(),
@@ -60,6 +66,7 @@ describe("productRoutes", () => {
     expect(prisma.Product.findMany).toHaveBeenCalledWith({
       where: {
         isAvailable: true,
+        vendor: { isActive: true, isVerified: true },
         vendorId: "vendor_1",
         category: "Rice",
         OR: [
@@ -91,6 +98,52 @@ describe("productRoutes", () => {
         price: 2500,
       }),
     });
+  });
+
+  it("rejects malformed product values at the backend boundary", async () => {
+    prisma.Vendor.findUnique.mockResolvedValue({ id: "vendor_1" });
+
+    const response = await server.request("/", {
+      method: "POST",
+      body: JSON.stringify({
+        name: "Jollof Rice",
+        price: "not-a-number",
+        stockQuantity: -1,
+      }),
+    });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error).toMatch(/price/i);
+    expect(prisma.Product.create).not.toHaveBeenCalled();
+  });
+
+  it("does not expose unavailable products through direct product reads", async () => {
+    prisma.Product.findFirst.mockResolvedValue(null);
+
+    const response = await server.request("/product_hidden", {
+      method: "GET",
+    });
+
+    expect(response.status).toBe(404);
+    expect(prisma.Product.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: "product_hidden",
+        isAvailable: true,
+        vendor: { isActive: true, isVerified: true },
+      },
+      include: { vendor: { select: { name: true, id: true, lga: true } } },
+    });
+  });
+
+  it("rejects unsupported product image types before storage access", async () => {
+    const response = await server.request("/image-upload", {
+      method: "POST",
+      body: JSON.stringify({ contentType: "application/pdf", size: 1024 }),
+    });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error).toMatch(/JPEG, PNG, or WebP/i);
+    expect(prisma.Vendor.findUnique).not.toHaveBeenCalled();
   });
 
   it("blocks product updates from non-owning vendors", async () => {
