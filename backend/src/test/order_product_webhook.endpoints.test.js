@@ -1,4 +1,12 @@
-import { afterAll, afterEach, beforeEach, describe, expect, it, jest } from "@jest/globals";
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  jest,
+} from "@jest/globals";
 
 process.env.JWT_ACCESS_SECRET ||= "test-access-secret";
 process.env.JWT_REFRESH_SECRET ||= "test-refresh-secret";
@@ -109,8 +117,14 @@ describe("product, order, and webhook endpoint verification", () => {
     prisma.Product.findUnique
       .mockResolvedValueOnce({ id: "p1", vendorId: "vendor_1" })
       .mockResolvedValueOnce({ id: "p1", vendorId: "vendor_1" });
-    prisma.Product.findFirst.mockResolvedValue({ id: "p1", vendor: { id: "v1" } });
-    prisma.Vendor.findUnique.mockResolvedValue({ id: "vendor_1", userId: "user_1" });
+    prisma.Product.findFirst.mockResolvedValue({
+      id: "p1",
+      vendor: { id: "v1" },
+    });
+    prisma.Vendor.findUnique.mockResolvedValue({
+      id: "vendor_1",
+      userId: "user_1",
+    });
     prisma.Product.create.mockResolvedValue({ id: "p_new" });
     prisma.Product.update.mockResolvedValue({ id: "p1", name: "Updated" });
     prisma.Product.delete.mockResolvedValue({ id: "p1" });
@@ -150,12 +164,29 @@ describe("product, order, and webhook endpoint verification", () => {
         vendorId: "vendor_1",
         status: "DELIVERED",
       });
-    prisma.User.findUnique.mockResolvedValue({ id: "user_1", email: "user@example.com" });
-    prisma.Vendor.findUnique.mockResolvedValue({ id: "vendor_1", paystackSubcode: "SUB_1", userId: "vendor_user_1" });
-    prisma.Product.findUnique.mockResolvedValue({ id: "p1", vendorId: "vendor_1", isAvailable: true, price: 2000 });
+    prisma.User.findUnique.mockResolvedValue({
+      id: "user_1",
+      email: "user@example.com",
+    });
+    prisma.Vendor.findUnique.mockResolvedValue({
+      id: "vendor_1",
+      paystackSubcode: "SUB_1",
+      userId: "vendor_user_1",
+    });
+    prisma.Product.findUnique.mockResolvedValue({
+      id: "p1",
+      vendorId: "vendor_1",
+      isAvailable: true,
+      price: 2000,
+    });
     prisma.Order.create.mockResolvedValue({ id: "order_new" });
-    prisma.Order.update.mockResolvedValue({ id: "order_new", paystackAccessCode: "acc_1" });
-    prisma.Order.findMany.mockResolvedValue([{ id: "order_1", status: "PENDING" }]);
+    prisma.Order.update.mockResolvedValue({
+      id: "order_new",
+      paystackAccessCode: "acc_1",
+    });
+    prisma.Order.findMany.mockResolvedValue([
+      { id: "order_1", status: "PENDING" },
+    ]);
     initializePayment.mockResolvedValue({
       success: true,
       data: { authorization_url: "https://pay", access_code: "acc_1" },
@@ -351,7 +382,12 @@ describe("product, order, and webhook endpoint verification", () => {
       totalAmount: 4500,
       paymentReference: "SG-ORD-1",
       items: [],
-      vendor: { id: "vendor_1", name: "Test Kitchen", phone: "+234", email: null },
+      vendor: {
+        id: "vendor_1",
+        name: "Test Kitchen",
+        phone: "+234",
+        email: null,
+      },
       user: { id: "guest_1", name: null, phone: "+2348123456789", email: null },
     });
 
@@ -368,9 +404,8 @@ describe("product, order, and webhook endpoint verification", () => {
   });
 
   it("rejects guest tracking without a token, with a foreign token, or with a session token", async () => {
-    const { generateGuestOrderToken, generateAccessToken } = await import(
-      "../utils/jwt.js"
-    );
+    const { generateGuestOrderToken, generateAccessToken } =
+      await import("../utils/jwt.js");
 
     // A token minted for another order must be refused before any DB lookup.
     const foreignToken = generateGuestOrderToken("order_other");

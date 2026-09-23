@@ -10,7 +10,12 @@ import {
   completeDeliveredOrder,
   triggerOrderRefund,
 } from "../services/orderService.js";
-import { generateDVC, generateIdempotencyKey, hashCode, verifyCode } from "../utils/generators.js";
+import {
+  generateDVC,
+  generateIdempotencyKey,
+  hashCode,
+  verifyCode,
+} from "../utils/generators.js";
 import { emitOrderStatusUpdate } from "../services/socketService.js";
 import { sendOrderNotification } from "../utils/notifications.js";
 import config from "../config.js";
@@ -156,7 +161,8 @@ router.post("/guest-checkout", checkoutLimiter, async (req, res) => {
         !product ||
         product.vendorId !== vendor.id ||
         !product.isAvailable ||
-        (product.stockQuantity !== null && product.stockQuantity < item.quantity)
+        (product.stockQuantity !== null &&
+          product.stockQuantity < item.quantity)
       ) {
         return res.status(400).json({
           success: false,
@@ -298,9 +304,7 @@ router.get("/:id/guest-status", async (req, res) => {
     });
 
     if (!order) {
-      return res
-        .status(404)
-        .json({ success: false, error: "Order not found" });
+      return res.status(404).json({ success: false, error: "Order not found" });
     }
 
     res.json({ success: true, order });
@@ -392,7 +396,8 @@ router.post("/", checkoutLimiter, authenticateToken, async (req, res) => {
         !product ||
         product.vendorId !== vendor.id ||
         !product.isAvailable ||
-        (product.stockQuantity !== null && product.stockQuantity < item.quantity)
+        (product.stockQuantity !== null &&
+          product.stockQuantity < item.quantity)
       ) {
         return res.status(400).json({
           success: false,
@@ -695,7 +700,10 @@ router.post(
         vendorName: vendor.name,
         customer: currentOrder.user || null,
       }).catch((error) =>
-        console.error(`[Notifications] accept notify failed for ${id}:`, error.message),
+        console.error(
+          `[Notifications] accept notify failed for ${id}:`,
+          error.message,
+        ),
       );
       void sendOrderNotification({
         type: "VENDOR_DVC",
@@ -704,7 +712,10 @@ router.post(
         vendor,
         dvc: dvcCode,
       }).catch((error) =>
-        console.error(`[Notifications] DVC notify failed for ${id}:`, error.message),
+        console.error(
+          `[Notifications] DVC notify failed for ${id}:`,
+          error.message,
+        ),
       );
 
       res.json({
@@ -805,7 +816,10 @@ router.post(
         vendorName: vendor.name,
         customer: order.user || null,
       }).catch((error) =>
-        console.error(`[Notifications] preparing notify failed for ${id}:`, error.message),
+        console.error(
+          `[Notifications] preparing notify failed for ${id}:`,
+          error.message,
+        ),
       );
 
       res.json({
@@ -981,7 +995,11 @@ router.post(
       }
 
       const updated = await global.prisma.Order.updateMany({
-        where: { id, vendorId: vendor.id, status: { in: ["ACCEPTED", "PREPARING"] } },
+        where: {
+          id,
+          vendorId: vendor.id,
+          status: { in: ["ACCEPTED", "PREPARING"] },
+        },
         data: {
           status: "OUT_FOR_DELIVERY",
           preparedAt: new Date(),
@@ -1017,7 +1035,10 @@ router.post(
         vendorName: vendor.name,
         customer: order.user || null,
       }).catch((error) =>
-        console.error(`[Notifications] out-for-delivery notify failed for ${id}:`, error.message),
+        console.error(
+          `[Notifications] out-for-delivery notify failed for ${id}:`,
+          error.message,
+        ),
       );
 
       res.json({
@@ -1126,7 +1147,10 @@ router.post(
           select: { dvcAttempts: true, dvcLockedUntil: true },
         });
 
-        if (finalState?.dvcLockedUntil && finalState.dvcLockedUntil > new Date()) {
+        if (
+          finalState?.dvcLockedUntil &&
+          finalState.dvcLockedUntil > new Date()
+        ) {
           return res.status(403).json({
             success: false,
             error:

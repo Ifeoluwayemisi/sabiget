@@ -58,7 +58,10 @@ router.get("/:id", async (req, res) => {
       include: { vendor: { select: { name: true, id: true, lga: true } } },
     });
 
-    if (!product) return res.status(404).json({ success: false, error: "Product not found" });
+    if (!product)
+      return res
+        .status(404)
+        .json({ success: false, error: "Product not found" });
 
     res.json({ success: true, product });
   } catch (error) {
@@ -80,7 +83,9 @@ router.post(
       const { contentType, size } = req.body || {};
       const validation = validateProductImage({ contentType, size });
       if (!validation.valid) {
-        return res.status(400).json({ success: false, error: validation.error });
+        return res
+          .status(400)
+          .json({ success: false, error: validation.error });
       }
 
       const vendor = await global.prisma.Vendor.findUnique({
@@ -119,8 +124,14 @@ function parseProductInput(input, { partial = false } = {}) {
   const has = (key) => Object.prototype.hasOwnProperty.call(input, key);
 
   if (!partial || has("name")) {
-    if (typeof input.name !== "string" || !input.name.trim() || input.name.trim().length > 120) {
-      return { error: "Product name is required and must be 120 characters or fewer." };
+    if (
+      typeof input.name !== "string" ||
+      !input.name.trim() ||
+      input.name.trim().length > 120
+    ) {
+      return {
+        error: "Product name is required and must be 120 characters or fewer.",
+      };
     }
     data.name = input.name.trim();
   }
@@ -138,7 +149,10 @@ function parseProductInput(input, { partial = false } = {}) {
       if (input[key] !== null && typeof input[key] !== "string") {
         return { error: `${key} must be text.` };
       }
-      if (typeof input[key] === "string" && input[key].length > (key === "description" ? 1000 : 80)) {
+      if (
+        typeof input[key] === "string" &&
+        input[key].length > (key === "description" ? 1000 : 80)
+      ) {
         return { error: `${key} is too long.` };
       }
       data[key] = input[key]?.trim() || null;
@@ -165,8 +179,15 @@ function parseProductInput(input, { partial = false } = {}) {
 
   if (has("preparationTime")) {
     const preparationTime = Number(input.preparationTime);
-    if (!Number.isInteger(preparationTime) || preparationTime < 1 || preparationTime > 1440) {
-      return { error: "Preparation time must be a whole number between 1 and 1440 minutes." };
+    if (
+      !Number.isInteger(preparationTime) ||
+      preparationTime < 1 ||
+      preparationTime > 1440
+    ) {
+      return {
+        error:
+          "Preparation time must be a whole number between 1 and 1440 minutes.",
+      };
     }
     data.preparationTime = preparationTime;
   }
@@ -199,7 +220,15 @@ function parseProductInput(input, { partial = false } = {}) {
  */
 router.post("/", authenticateToken, authorize("VENDOR"), async (req, res) => {
   try {
-    const { name, price, description, category, imageUrl, preparationTime, stockQuantity } = req.body;
+    const {
+      name,
+      price,
+      description,
+      category,
+      imageUrl,
+      preparationTime,
+      stockQuantity,
+    } = req.body;
     const userId = req.user.userId;
 
     const parsed = parseProductInput(req.body);
@@ -208,7 +237,10 @@ router.post("/", authenticateToken, authorize("VENDOR"), async (req, res) => {
     }
 
     const vendor = await global.prisma.Vendor.findUnique({ where: { userId } });
-    if (!vendor) return res.status(403).json({ success: false, error: "Vendor profile not found" });
+    if (!vendor)
+      return res
+        .status(403)
+        .json({ success: false, error: "Vendor profile not found" });
 
     const product = await global.prisma.Product.create({
       data: {
@@ -216,11 +248,15 @@ router.post("/", authenticateToken, authorize("VENDOR"), async (req, res) => {
         ...parsed.data,
         preparationTime: parsed.data.preparationTime ?? 15,
         stockQuantity:
-          parsed.data.stockQuantity !== undefined ? parsed.data.stockQuantity : null,
+          parsed.data.stockQuantity !== undefined
+            ? parsed.data.stockQuantity
+            : null,
       },
     });
 
-    res.status(201).json({ success: true, message: "Product created", product });
+    res
+      .status(201)
+      .json({ success: true, message: "Product created", product });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -237,17 +273,41 @@ router.patch(
   async (req, res) => {
     try {
       const { id } = req.params;
-      const { name, price, isAvailable, description, category, imageUrl, preparationTime, stockQuantity } = req.body;
+      const {
+        name,
+        price,
+        isAvailable,
+        description,
+        category,
+        imageUrl,
+        preparationTime,
+        stockQuantity,
+      } = req.body;
       const userId = req.user.userId;
 
-      const vendor = await global.prisma.Vendor.findUnique({ where: { userId } });
-      if (!vendor) return res.status(403).json({ success: false, error: "Vendor profile not found" });
+      const vendor = await global.prisma.Vendor.findUnique({
+        where: { userId },
+      });
+      if (!vendor)
+        return res
+          .status(403)
+          .json({ success: false, error: "Vendor profile not found" });
 
-      const existingProduct = await global.prisma.Product.findUnique({ where: { id } });
-      if (!existingProduct) return res.status(404).json({ success: false, error: "Product not found" });
-      
+      const existingProduct = await global.prisma.Product.findUnique({
+        where: { id },
+      });
+      if (!existingProduct)
+        return res
+          .status(404)
+          .json({ success: false, error: "Product not found" });
+
       if (existingProduct.vendorId !== vendor.id) {
-        return res.status(403).json({ success: false, error: "Not authorized to update this product" });
+        return res
+          .status(403)
+          .json({
+            success: false,
+            error: "Not authorized to update this product",
+          });
       }
 
       const parsed = parseProductInput(req.body, { partial: true });
@@ -281,14 +341,29 @@ router.delete(
       const { id } = req.params;
       const userId = req.user.userId;
 
-      const vendor = await global.prisma.Vendor.findUnique({ where: { userId } });
-      if (!vendor) return res.status(403).json({ success: false, error: "Vendor profile not found" });
+      const vendor = await global.prisma.Vendor.findUnique({
+        where: { userId },
+      });
+      if (!vendor)
+        return res
+          .status(403)
+          .json({ success: false, error: "Vendor profile not found" });
 
-      const existingProduct = await global.prisma.Product.findUnique({ where: { id } });
-      if (!existingProduct) return res.status(404).json({ success: false, error: "Product not found" });
-      
+      const existingProduct = await global.prisma.Product.findUnique({
+        where: { id },
+      });
+      if (!existingProduct)
+        return res
+          .status(404)
+          .json({ success: false, error: "Product not found" });
+
       if (existingProduct.vendorId !== vendor.id) {
-        return res.status(403).json({ success: false, error: "Not authorized to delete this product" });
+        return res
+          .status(403)
+          .json({
+            success: false,
+            error: "Not authorized to delete this product",
+          });
       }
 
       await global.prisma.Product.delete({ where: { id } });

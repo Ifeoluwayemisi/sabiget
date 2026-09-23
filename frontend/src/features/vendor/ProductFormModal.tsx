@@ -93,7 +93,9 @@ export default function ProductFormModal({
         setDescription(product.description ?? "");
         setPrice(String(product.price));
         setCategory(product.category ?? "");
-        setStockQuantity(product.stockQuantity == null ? "" : String(product.stockQuantity));
+        setStockQuantity(
+          product.stockQuantity == null ? "" : String(product.stockQuantity),
+        );
         setImageUrl(product.imageUrl ?? "");
         setIsAvailable(product.isAvailable);
       } else {
@@ -159,10 +161,13 @@ export default function ProductFormModal({
       return;
     }
 
-    const parsedStock = stockQuantity.trim() === "" ? null : Number(stockQuantity);
+    const parsedStock =
+      stockQuantity.trim() === "" ? null : Number(stockQuantity);
     if (
       parsedStock !== null &&
-      (!Number.isInteger(parsedStock) || parsedStock < 0 || parsedStock > 1000000)
+      (!Number.isInteger(parsedStock) ||
+        parsedStock < 0 ||
+        parsedStock > 1000000)
     ) {
       setError("Stock quantity must be a whole number from 0 to 1,000,000.");
       return;
@@ -382,7 +387,9 @@ export default function ProductFormModal({
                   id="product-image-file"
                   type="file"
                   accept="image/jpeg,image/png,image/webp"
-                  onChange={(event) => handleImageChange(event.target.files?.[0])}
+                  onChange={(event) =>
+                    handleImageChange(event.target.files?.[0])
+                  }
                   disabled={submitting}
                   className="block w-full cursor-pointer rounded-xl border border-dashed border-[var(--color-line-strong)] bg-[var(--color-surface-muted)] px-3 py-3 text-sm text-[var(--color-ink-muted)] file:mr-3 file:rounded-lg file:border-0 file:bg-[var(--color-brand-soft)] file:px-3 file:py-2 file:text-xs file:font-bold file:text-[var(--color-brand-deep)]"
                 />

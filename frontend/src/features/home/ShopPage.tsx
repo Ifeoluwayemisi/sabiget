@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { motion, MotionConfig } from "framer-motion";
 import {
   AlertTriangle,
@@ -105,7 +112,10 @@ export default function ShopPage() {
   );
 
   const [locationStatus, setLocationStatus] = useState<LocationStatus>("idle");
-  const [coords, setCoords] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [coords, setCoords] = useState<{
+    latitude: number;
+    longitude: number;
+  } | null>(null);
   const [discoveryArea, setDiscoveryArea] = useState<string | null>(null);
   const [vendors, setVendors] = useState<VendorCardData[] | null>(null);
   const [vendorsError, setVendorsError] = useState<string | null>(null);
@@ -252,11 +262,14 @@ export default function ShopPage() {
     }
   }, [coords, discoveryArea, requestLocation, resetDiscoveryFilters]);
 
-  const openVendor = useCallback((vendor: VendorCardData) => {
-    setFiltersBeforeVendor({ searchQuery, selectedArea });
-    setSelectedVendor({ id: vendor.id, name: vendor.name });
-    updateUrlParams(null, vendor.id);
-  }, [searchQuery, selectedArea, updateUrlParams]);
+  const openVendor = useCallback(
+    (vendor: VendorCardData) => {
+      setFiltersBeforeVendor({ searchQuery, selectedArea });
+      setSelectedVendor({ id: vendor.id, name: vendor.name });
+      updateUrlParams(null, vendor.id);
+    },
+    [searchQuery, selectedArea, updateUrlParams],
+  );
 
   const closeVendor = useCallback(() => {
     setSelectedVendor(null);
@@ -342,7 +355,11 @@ export default function ShopPage() {
         transition={{ duration: 0.45, ease: "easeOut" }}
       >
         <div className="sabiget-shell flex h-14 items-center justify-between sm:h-16">
-          <Link href="/" className="flex items-center gap-2.5" aria-label="SabiGet home">
+          <Link
+            href="/"
+            className="flex items-center gap-2.5"
+            aria-label="SabiGet home"
+          >
             <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-[#ff4500] text-sm font-black text-white shadow-[0_6px_16px_-6px_rgba(255,69,0,0.7)] sm:h-9 sm:w-9 sm:text-base">
               S
             </span>
@@ -403,7 +420,10 @@ export default function ShopPage() {
                   className="mb-6 flex items-center justify-center gap-2 text-sm font-medium text-[#666666] sm:mb-8"
                   role="status"
                 >
-                  <Loader2 className="h-4 w-4 animate-spin text-[#ff4500]" aria-hidden="true" />
+                  <Loader2
+                    className="h-4 w-4 animate-spin text-[#ff4500]"
+                    aria-hidden="true"
+                  />
                   Finding food near you...
                 </p>
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 lg:grid-cols-4">
@@ -421,7 +441,10 @@ export default function ShopPage() {
                 className="mx-auto max-w-md rounded-2xl border border-[var(--color-line)] bg-white p-6 text-center shadow-[0_18px_40px_-18px_rgba(153,61,17,0.28)] sm:p-8"
               >
                 <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-[#ffefe8] text-[#e63d00] sm:h-14 sm:w-14">
-                  <Search className="h-6 w-6 sm:h-7 sm:w-7" aria-hidden="true" />
+                  <Search
+                    className="h-6 w-6 sm:h-7 sm:w-7"
+                    aria-hidden="true"
+                  />
                 </span>
                 <h2 className="mt-4 text-lg font-bold text-[#111111] sm:mt-5 sm:text-xl">
                   What&apos;s good around you?
@@ -431,13 +454,21 @@ export default function ShopPage() {
                   vendors within {DISCOVERY_RADIUS_KM} km of you.
                 </p>
                 {locationStatus === "denied" && (
-                  <p className="mt-3 text-sm font-medium text-[#b3400f]" role="alert">
-                    Location access was denied. You can browse by typing your area below.
+                  <p
+                    className="mt-3 text-sm font-medium text-[#b3400f]"
+                    role="alert"
+                  >
+                    Location access was denied. You can browse by typing your
+                    area below.
                   </p>
                 )}
                 {locationStatus === "unavailable" && (
-                  <p className="mt-3 text-sm font-medium text-[#b3400f]" role="alert">
-                    Location is unavailable on this device. You can browse by typing your area below.
+                  <p
+                    className="mt-3 text-sm font-medium text-[#b3400f]"
+                    role="alert"
+                  >
+                    Location is unavailable on this device. You can browse by
+                    typing your area below.
                   </p>
                 )}
                 <button
@@ -490,7 +521,10 @@ export default function ShopPage() {
             ) : vendorsError ? (
               <div className="mx-auto max-w-md rounded-2xl border border-[var(--color-line)] bg-white p-6 text-center shadow-sm sm:p-8">
                 <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-[#fff4ec] text-[#b3400f] sm:h-14 sm:w-14">
-                  <AlertTriangle className="h-6 w-6 sm:h-7 sm:w-7" aria-hidden="true" />
+                  <AlertTriangle
+                    className="h-6 w-6 sm:h-7 sm:w-7"
+                    aria-hidden="true"
+                  />
                 </span>
                 <h2 className="mt-4 text-lg font-bold text-[#111111] sm:mt-5 sm:text-xl">
                   Something went wrong
@@ -510,7 +544,10 @@ export default function ShopPage() {
             ) : vendors !== null && vendors.length === 0 ? (
               <div className="mx-auto max-w-md rounded-2xl border border-[var(--color-line)] bg-white p-6 text-center shadow-sm sm:p-8">
                 <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-[#ffefe8] text-[#e63d00] sm:h-14 sm:w-14">
-                  <MapPin className="h-6 w-6 sm:h-7 sm:w-7" aria-hidden="true" />
+                  <MapPin
+                    className="h-6 w-6 sm:h-7 sm:w-7"
+                    aria-hidden="true"
+                  />
                 </span>
                 <h2 className="mt-4 text-lg font-bold text-[#111111] sm:mt-5 sm:text-xl">
                   {discoveryArea
@@ -534,7 +571,10 @@ export default function ShopPage() {
               </div>
             ) : vendors !== null && vendors.length > 0 ? (
               <>
-                <p className="mb-5 flex items-center justify-center gap-2 text-sm font-medium text-[#2e7d32] sm:mb-8" role="status">
+                <p
+                  className="mb-5 flex items-center justify-center gap-2 text-sm font-medium text-[#2e7d32] sm:mb-8"
+                  role="status"
+                >
                   <MapPin className="h-4 w-4" aria-hidden="true" />
                   {discoveryArea
                     ? `Food near ${discoveryArea}`
@@ -551,7 +591,9 @@ export default function ShopPage() {
                     <input
                       type="search"
                       value={searchQuery}
-                      onChange={(event) => handleSearchChange(event.target.value)}
+                      onChange={(event) =>
+                        handleSearchChange(event.target.value)
+                      }
                       placeholder="Search vendors by name or area"
                       className="min-h-[44px] w-full rounded-full border border-[var(--color-line-strong)] bg-white pl-10 pr-10 text-sm text-[#111111] outline-none placeholder:text-[#8a8a8a] focus:border-[#ff4500] focus:ring-4 focus:ring-[rgba(255,69,0,0.14)] sm:min-h-[48px] sm:pl-11"
                     />
@@ -573,7 +615,11 @@ export default function ShopPage() {
                     <p className="mb-2 text-center text-xs font-medium text-[#8a8a8a]">
                       Filter by area
                     </p>
-                    <div className="flex flex-wrap justify-center gap-2" role="group" aria-label="Filter vendors by area">
+                    <div
+                      className="flex flex-wrap justify-center gap-2"
+                      role="group"
+                      aria-label="Filter vendors by area"
+                    >
                       <button
                         type="button"
                         onClick={() => setSelectedArea(null)}
@@ -612,7 +658,9 @@ export default function ShopPage() {
                 {hasActiveFilters && (
                   <div className="mx-auto mb-5 max-w-xl sm:mb-6">
                     <div className="flex flex-wrap items-center justify-center gap-2">
-                      <span className="text-xs text-[#8a8a8a]">Active filters:</span>
+                      <span className="text-xs text-[#8a8a8a]">
+                        Active filters:
+                      </span>
                       {searchQuery && (
                         <span className="inline-flex items-center gap-1.5 rounded-full bg-[#ffefe8] px-3 py-1 text-xs font-semibold text-[#e63d00]">
                           Search: &ldquo;{searchQuery}&rdquo;
@@ -653,7 +701,10 @@ export default function ShopPage() {
                 {visibleVendors !== null && visibleVendors.length === 0 ? (
                   <div className="mx-auto max-w-md rounded-2xl border border-[var(--color-line)] bg-white p-6 text-center shadow-sm sm:p-8">
                     <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-[#ffefe8] text-[#e63d00] sm:h-14 sm:w-14">
-                      <Search className="h-6 w-6 sm:h-7 sm:w-7" aria-hidden="true" />
+                      <Search
+                        className="h-6 w-6 sm:h-7 sm:w-7"
+                        aria-hidden="true"
+                      />
                     </span>
                     <h3 className="mt-4 text-lg font-bold text-[#111111]">
                       No vendors found

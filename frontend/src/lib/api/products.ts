@@ -89,7 +89,9 @@ async function parseBackendError(response: Response): Promise<string> {
 }
 
 /** Fetch the authenticated vendor's full product list (available + unavailable). */
-export async function fetchVendorProducts(signal?: AbortSignal): Promise<Product[]> {
+export async function fetchVendorProducts(
+  signal?: AbortSignal,
+): Promise<Product[]> {
   const response = await apiRequest("/vendors/me", { signal });
   if (!response.ok) throw new Error(await parseBackendError(response));
   const data = (await response.json()) as {

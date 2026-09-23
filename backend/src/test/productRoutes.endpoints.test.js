@@ -1,4 +1,12 @@
-import { afterAll, afterEach, beforeEach, describe, expect, it, jest } from "@jest/globals";
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  jest,
+} from "@jest/globals";
 
 // Restored from a pre-ESM-migration CommonJS test file (see
 // vendorRoutes.endpoints.test.js for context). Assertions unchanged.
@@ -58,9 +66,12 @@ describe("productRoutes", () => {
   it("returns filtered products", async () => {
     prisma.Product.findMany.mockResolvedValue([{ id: "product_1" }]);
 
-    const response = await server.request("/?vendorId=vendor_1&category=Rice&search=jollof", {
-      method: "GET",
-    });
+    const response = await server.request(
+      "/?vendorId=vendor_1&category=Rice&search=jollof",
+      {
+        method: "GET",
+      },
+    );
 
     expect(response.status).toBe(200);
     expect(prisma.Product.findMany).toHaveBeenCalledWith({

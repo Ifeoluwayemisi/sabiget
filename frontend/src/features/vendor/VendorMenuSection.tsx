@@ -287,28 +287,28 @@ export default function VendorMenuSection() {
                     </p>
                   </div>
                   <div className="ml-auto shrink-0">
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={product.isAvailable}
-                    aria-label={`${product.isAvailable ? "Hide" : "Show"} ${product.name} to customers`}
-                    onClick={() => handleToggleAvailability(product)}
-                    disabled={busy !== null}
-                    className={`inline-flex min-h-[40px] shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold transition-colors ${
-                      product.isAvailable
-                        ? "bg-[var(--color-accent-soft)] text-[var(--color-accent)] hover:bg-[#dcefdc]"
-                        : "bg-[var(--color-surface-muted)] text-[var(--color-ink-muted)] hover:bg-[#f4e5d8]"
-                    }`}
-                  >
-                    {busy ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    ) : product.isAvailable ? (
-                      <Check className="h-3.5 w-3.5" />
-                    ) : (
-                      <X className="h-3.5 w-3.5" />
-                    )}
-                    {product.isAvailable ? "Available" : "Unavailable"}
-                  </button>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={product.isAvailable}
+                      aria-label={`${product.isAvailable ? "Hide" : "Show"} ${product.name} to customers`}
+                      onClick={() => handleToggleAvailability(product)}
+                      disabled={busy !== null}
+                      className={`inline-flex min-h-[40px] shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold transition-colors ${
+                        product.isAvailable
+                          ? "bg-[var(--color-accent-soft)] text-[var(--color-accent)] hover:bg-[#dcefdc]"
+                          : "bg-[var(--color-surface-muted)] text-[var(--color-ink-muted)] hover:bg-[#f4e5d8]"
+                      }`}
+                    >
+                      {busy ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : product.isAvailable ? (
+                        <Check className="h-3.5 w-3.5" />
+                      ) : (
+                        <X className="h-3.5 w-3.5" />
+                      )}
+                      {product.isAvailable ? "Available" : "Unavailable"}
+                    </button>
                   </div>
                 </div>
 
