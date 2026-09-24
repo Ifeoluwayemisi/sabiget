@@ -519,7 +519,7 @@ export default function VendorDashboardPage() {
   const renderContent = () => {
     switch (activeTab) {
       case "orders":
-        return <VendorOrdersSection />;
+        return <VendorOrdersSection vendorId={profile?.id} />;
       case "menu":
         return <VendorMenuSection />;
       case "payments":

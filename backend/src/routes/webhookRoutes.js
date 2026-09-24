@@ -136,7 +136,11 @@ router.post("/paystack", async (req, res) => {
       error: error.message,
     });
 
-    return res.status(200).json({
+    // Non-2xx keeps Paystack retrying the event. Returning 2xx here would
+    // silently drop an event that should have moved the order (e.g. the
+    // charge.success that confirms payment), leaving an actually-paid order
+    // stuck in UNPAID forever with no retry.
+    return res.status(500).json({
       success: false,
       error: error.message,
     });

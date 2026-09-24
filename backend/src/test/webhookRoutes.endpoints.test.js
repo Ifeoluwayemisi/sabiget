@@ -194,7 +194,9 @@ describe("webhookRoutes (legacy suite)", () => {
       }),
     });
 
-    expect(response.status).toBe(200);
+    // A processing failure must return 5xx so Paystack keeps retrying the
+    // event; a paid order can otherwise be left stuck in UNPAID permanently.
+    expect(response.status).toBe(500);
     expect(response.body.success).toBe(false);
     expect(response.body.error).toContain("Payment amount mismatch");
     expect(prisma.WebhookLog.update).toHaveBeenCalledWith({

@@ -3,6 +3,9 @@
 # response" failures during generate/migrate. node:18-slim ships libssl3.
 FROM node:18-slim
 WORKDIR /app
+RUN apt-get update \
+	&& apt-get install -y --no-install-recommends openssl ca-certificates \
+	&& rm -rf /var/lib/apt/lists/*
 COPY package*.json ./
 # Install all dependencies so Prisma CLI is available in container
 RUN npm ci

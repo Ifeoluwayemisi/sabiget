@@ -114,11 +114,123 @@ describe("orderRoutes", () => {
       message: "Existing order returned for idempotent request",
       orderId: "ord_existing",
       reference: "pay_ref_existing",
+      authorizationUrl: "https://checkout.paystack.com/access_existing",
       paystackAccessCode: "access_existing",
       idempotencyKey: "idem_1",
       status: "UNPAID",
     });
     expect(initializePayment).not.toHaveBeenCalled();
+    expect(prisma.Order.create).not.toHaveBeenCalled();
+  });
+
+  it("re-initializes payment for a stranded UNPAID order with no access code", async () => {
+    prisma.Order.findUnique.mockResolvedValue({
+      id: "ord_recovery",
+      userId: "user_1",
+      paymentReference: "pay_ref_recovery",
+      paystackAccessCode: null,
+      totalAmount: 5000,
+      serviceFee: 500,
+      idempotencyKey: "idem_recovery",
+      status: "UNPAID",
+      vendorId: "vendor_1",
+    });
+    prisma.User.findUnique.mockResolvedValue({
+      id: "user_1",
+      email: "member@test.com",
+    });
+    prisma.Vendor.findUnique.mockResolvedValue({
+      id: "vendor_1",
+      paystackSubcode: "SUB_vendor_1",
+    });
+    initializePayment.mockResolvedValue({
+      success: true,
+      data: {
+        access_code: "access_recovery",
+        authorization_url: "https://checkout.paystack.com/access_recovery",
+      },
+    });
+
+    const response = await server.request("/", {
+      method: "POST",
+      headers: {
+        "x-idempotency-key": "idem_recovery",
+      },
+      body: JSON.stringify({
+        vendorId: "vendor_1",
+        items: [{ productId: "prod_1", quantity: 1 }],
+        deliveryAddress: "123 Test Street",
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({
+      success: true,
+      message: "Existing order returned for idempotent request",
+      orderId: "ord_recovery",
+      reference: "pay_ref_recovery",
+      authorizationUrl: "https://checkout.paystack.com/access_recovery",
+      paystackAccessCode: "access_recovery",
+      idempotencyKey: "idem_recovery",
+      status: "UNPAID",
+    });
+    expect(initializePayment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reference: "pay_ref_recovery",
+        amount: 5000,
+      }),
+    );
+    expect(prisma.Order.update).toHaveBeenCalledWith({
+      where: { id: "ord_recovery" },
+      data: { paystackAccessCode: "access_recovery" },
+    });
+    expect(prisma.Order.create).not.toHaveBeenCalled();
+  });
+
+  it("surfaces a 502 when payment recovery fails for a stranded UNPAID order", async () => {
+    prisma.Order.findUnique.mockResolvedValue({
+      id: "ord_recovery_fail",
+      userId: "user_1",
+      paymentReference: "pay_ref_recovery_fail",
+      paystackAccessCode: null,
+      totalAmount: 5000,
+      serviceFee: 500,
+      idempotencyKey: "idem_recovery_fail",
+      status: "UNPAID",
+      vendorId: "vendor_1",
+    });
+    prisma.User.findUnique.mockResolvedValue({
+      id: "user_1",
+      email: "member@test.com",
+    });
+    prisma.Vendor.findUnique.mockResolvedValue({
+      id: "vendor_1",
+      paystackSubcode: "SUB_vendor_1",
+    });
+    initializePayment.mockResolvedValue({
+      success: false,
+      error: "provider timeout",
+    });
+
+    const response = await server.request("/", {
+      method: "POST",
+      headers: {
+        "x-idempotency-key": "idem_recovery_fail",
+      },
+      body: JSON.stringify({
+        vendorId: "vendor_1",
+        items: [{ productId: "prod_1", quantity: 1 }],
+        deliveryAddress: "123 Test Street",
+      }),
+    });
+
+    expect(response.status).toBe(502);
+    expect(response.body).toEqual({
+      success: false,
+      error: "Payment initialization failed",
+      orderId: "ord_recovery_fail",
+      status: "UNPAID",
+    });
     expect(prisma.Order.create).not.toHaveBeenCalled();
   });
 

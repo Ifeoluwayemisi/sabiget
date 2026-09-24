@@ -72,7 +72,11 @@ function formatActionError(err: ActionError): string {
   return err.message;
 }
 
-export default function VendorOrdersSection() {
+export default function VendorOrdersSection({
+  vendorId: vendorIdProp,
+}: {
+  vendorId?: string;
+}) {
   const [orders, setOrders] = useState<VendorOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -128,7 +132,11 @@ export default function VendorOrdersSection() {
     void load();
   }, [fetchOrders]);
 
-  const vendorId = orders.find((order) => order.vendorId)?.vendorId;
+  // The vendor id comes from the logged-in vendor's own profile (/vendors/me),
+  // not from a fetched order — a brand-new store with no orders yet must still
+  // join its socket room or it would miss every first order:new event.
+  const vendorId =
+    vendorIdProp || orders.find((order) => order.vendorId)?.vendorId || null;
 
   // Realtime layer: socket events only trigger an authoritative REST
   // reconciliation, never direct state mutation.

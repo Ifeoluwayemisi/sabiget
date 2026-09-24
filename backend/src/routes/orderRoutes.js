@@ -34,6 +34,71 @@ function getIdempotencyKey(req) {
   );
 }
 
+// Standard Paystack checkout URL shape: the authorization URL is derived from
+// the access code. Reconstructing it allows an idempotent retry of an order
+// whose original payment transaction was already created (so re-initializing
+// with the same reference would fail with "Duplicate Transaction Reference").
+function buildCheckoutUrl(accessCode) {
+  return accessCode ? `https://checkout.paystack.com/${accessCode}` : null;
+}
+
+/**
+ * Recover a usable payment entry point for an existing UNPAID order during a
+ * checkout retry. When the order already holds an access code (payment was
+ * initialized but the response was lost), the checkout URL is rebuilt from it.
+ * When no transaction was ever created, a fresh initialization is attempted
+ * with the SAME reference — that reference is still unused on Paystack's side,
+ * so a genuine retry succeeds instead of creating a duplicate charge.
+ */
+async function recoverPaymentForExistingOrder(existingOrder, email) {
+  if (existingOrder.paystackAccessCode) {
+    return {
+      ok: true,
+      authorizationUrl: buildCheckoutUrl(existingOrder.paystackAccessCode),
+      paystackAccessCode: existingOrder.paystackAccessCode,
+    };
+  }
+
+  const vendor = await global.prisma.Vendor.findUnique({
+    where: { id: existingOrder.vendorId },
+  });
+  if (!vendor || !vendor.paystackSubcode) {
+    return {
+      ok: false,
+      error: "Vendor is not configured to receive payments yet.",
+    };
+  }
+
+  const paystackRes = await initializePayment({
+    email,
+    amount: existingOrder.totalAmount,
+    reference: existingOrder.paymentReference,
+    callbackUrl: config.paystack.callbackUrl,
+    subaccount: vendor.paystackSubcode,
+    transaction_charge: existingOrder.serviceFee,
+    metadata: {
+      orderId: existingOrder.id,
+      vendorId: vendor.id,
+      userId: existingOrder.userId,
+    },
+  });
+
+  if (!paystackRes.success) {
+    return { ok: false, error: "Payment initialization failed" };
+  }
+
+  await global.prisma.Order.update({
+    where: { id: existingOrder.id },
+    data: { paystackAccessCode: paystackRes.data.access_code },
+  });
+
+  return {
+    ok: true,
+    authorizationUrl: paystackRes.data.authorization_url,
+    paystackAccessCode: paystackRes.data.access_code,
+  };
+}
+
 /**
  * POST /api/orders/guest-checkout
  * Create order as anonymous GUEST (no authentication needed)
@@ -110,12 +175,29 @@ router.post("/guest-checkout", checkoutLimiter, async (req, res) => {
         });
       }
 
+      // Recover a working payment entry point so a retried checkout of an
+      // UNPAID order never strands the customer without an authorization URL.
+      const recovery = await recoverPaymentForExistingOrder(
+        existingOrder,
+        user.email || `guest+${phone}@sabiget.com`,
+      );
+
+      if (!recovery.ok) {
+        return res.status(502).json({
+          success: false,
+          error: recovery.error,
+          orderId: existingOrder.id,
+          status: existingOrder.status,
+        });
+      }
+
       return res.status(200).json({
         success: true,
         message: "Existing order returned for idempotent request",
         orderId: existingOrder.id,
         reference: existingOrder.paymentReference,
-        paystackAccessCode: existingOrder.paystackAccessCode,
+        authorizationUrl: recovery.authorizationUrl,
+        paystackAccessCode: recovery.paystackAccessCode,
         guestOrderToken: generateGuestOrderToken(existingOrder.id),
         idempotencyKey: existingOrder.idempotencyKey,
         status: existingOrder.status,
@@ -343,12 +425,31 @@ router.post("/", checkoutLimiter, authenticateToken, async (req, res) => {
         });
       }
 
+      const orderUser = await global.prisma.User.findUnique({
+        where: { id: userId },
+      });
+
+      const recovery = await recoverPaymentForExistingOrder(
+        existingOrder,
+        orderUser?.email || "customer@sabiget.com",
+      );
+
+      if (!recovery.ok) {
+        return res.status(502).json({
+          success: false,
+          error: recovery.error,
+          orderId: existingOrder.id,
+          status: existingOrder.status,
+        });
+      }
+
       return res.status(200).json({
         success: true,
         message: "Existing order returned for idempotent request",
         orderId: existingOrder.id,
         reference: existingOrder.paymentReference,
-        paystackAccessCode: existingOrder.paystackAccessCode,
+        authorizationUrl: recovery.authorizationUrl,
+        paystackAccessCode: recovery.paystackAccessCode,
         idempotencyKey: existingOrder.idempotencyKey,
         status: existingOrder.status,
       });
