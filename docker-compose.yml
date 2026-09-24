@@ -41,6 +41,15 @@ services:
       # Development-only secrets. Production must inject real values.
       - JWT_ACCESS_SECRET=dev-only-access-secret-change-me
       - JWT_REFRESH_SECRET=dev-only-refresh-secret-change-me
+      # Product media (S3-compatible object storage). Leave unset to fail closed
+      # with 503 MEDIA_NOT_CONFIGURED. Inject real values via the shell or a
+      # project-root .env file (compose interpolates ${VAR}).
+      - MEDIA_BUCKET=${MEDIA_BUCKET:-}
+      - MEDIA_REGION=${MEDIA_REGION:-}
+      - MEDIA_ENDPOINT=${MEDIA_ENDPOINT:-}
+      - MEDIA_ACCESS_KEY_ID=${MEDIA_ACCESS_KEY_ID:-}
+      - MEDIA_SECRET_ACCESS_KEY=${MEDIA_SECRET_ACCESS_KEY:-}
+      - MEDIA_PUBLIC_BASE_URL=${MEDIA_PUBLIC_BASE_URL:-}
 
   frontend:
     build:

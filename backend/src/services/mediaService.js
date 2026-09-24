@@ -1,5 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+import {
+  S3Client,
+  PutObjectCommand,
+  DeleteObjectCommand,
+} from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 const ALLOWED_IMAGE_TYPES = new Map([
@@ -9,6 +13,10 @@ const ALLOWED_IMAGE_TYPES = new Map([
 ]);
 
 export const PRODUCT_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
+
+// Server-generated object keys only; never a client filename or free-form path.
+const MANAGED_PRODUCT_OBJECT_PATTERN =
+  /^vendors\/[^/]+\/products\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(jpg|png|webp)$/i;
 
 function getMediaConfig() {
   return {
@@ -64,22 +72,8 @@ function getPublicUrl(key, config) {
     .join("/")}`;
 }
 
-export async function createProductImageUpload({ vendorId, contentType }) {
-  const config = getMediaConfig();
-  if (
-    !config.bucket ||
-    !config.region ||
-    !config.accessKeyId ||
-    !config.secretAccessKey
-  ) {
-    const error = new Error("Product image storage is not configured.");
-    error.code = "MEDIA_NOT_CONFIGURED";
-    throw error;
-  }
-
-  const extension = ALLOWED_IMAGE_TYPES.get(contentType);
-  const key = `vendors/${vendorId}/products/${randomUUID()}.${extension}`;
-  const client = new S3Client({
+function createS3Client(config) {
+  return new S3Client({
     region: config.region,
     endpoint: config.endpoint || undefined,
     forcePathStyle: Boolean(config.endpoint),
@@ -88,6 +82,110 @@ export async function createProductImageUpload({ vendorId, contentType }) {
       secretAccessKey: config.secretAccessKey,
     },
   });
+}
+
+function isMediaConfigured(config) {
+  return Boolean(
+    config.bucket && config.region && config.accessKeyId && config.secretAccessKey,
+  );
+}
+
+function mediaNotConfigured() {
+  const error = new Error("Product image storage is not configured.");
+  error.code = "MEDIA_NOT_CONFIGURED";
+  return error;
+}
+
+/**
+ * Derive the object key from a stored product image URL and prove it belongs
+ * to SabiGet's managed storage and to the given vendor's product namespace.
+ *
+ * Returns the key when the URL maps to:
+ *   vendors/{vendorId}/products/{uuid}.{ext}
+ * and the derived key sits under our configured public base URL. Returns null
+ * for external vendor-supplied HTTPS URLs and for any key that would belong to
+ * a different vendor or a non-product object, so the caller never issues an S3
+ * deletion for an object we cannot prove it owns.
+ */
+export function getManagedProductKeyFromUrl({ imageUrl, vendorId }) {
+  if (typeof imageUrl !== "string" || imageUrl.length === 0) return null;
+  if (typeof vendorId !== "string" || vendorId.length === 0) return null;
+
+  const config = getMediaConfig();
+  const expectedPrefix = `vendors/${vendorId}/products/`;
+
+  let normalized = null;
+  if (config.publicBaseUrl) {
+    const base = config.publicBaseUrl.replace(/\/$/, "");
+    if (imageUrl.startsWith(`${base}/`)) {
+      normalized = imageUrl.slice(base.length + 1);
+    }
+  } else if (config.endpoint) {
+    const base = `${config.endpoint.replace(/\/$/, "")}/${config.bucket}`;
+    if (imageUrl.startsWith(`${base}/`)) {
+      normalized = imageUrl.slice(base.length + 1);
+    }
+  } else if (config.bucket && config.region) {
+    const base = `https://${config.bucket}.s3.${config.region}.amazonaws.com`;
+    if (imageUrl.startsWith(`${base}/`)) {
+      normalized = imageUrl.slice(base.length + 1);
+    }
+  }
+
+  if (!normalized) return null;
+  const key = normalized
+    .split("/")
+    .map((segment) => {
+      try {
+        return decodeURIComponent(segment);
+      } catch {
+        return segment;
+      }
+    })
+    .join("/");
+
+  if (!key.startsWith(expectedPrefix)) return null;
+  if (!MANAGED_PRODUCT_OBJECT_PATTERN.test(key)) return null;
+
+  return key;
+}
+
+/**
+ * Delete a managed product image object, but ONLY when the URL can be proven
+ * to be a SabiGet-managed object owned by the given vendor. External URLs and
+ * objects owned by other vendors are never sent to S3.
+ *
+ * Returns { deleted: true, key } on success, or
+ * { deleted: false, reason: "not-managed" | "not-configured" }.
+ */
+export async function deleteManagedProductImage({ imageUrl, vendorId }) {
+  const key = getManagedProductKeyFromUrl({ imageUrl, vendorId });
+  if (!key) {
+    return { deleted: false, reason: "not-managed" };
+  }
+
+  const config = getMediaConfig();
+  if (!isMediaConfigured(config)) {
+    return { deleted: false, reason: "not-configured" };
+  }
+
+  const client = createS3Client(config);
+  await client.send(
+    new DeleteObjectCommand({ Bucket: config.bucket, Key: key }),
+  );
+
+  return { deleted: true, key };
+}
+
+export async function createProductImageUpload({ vendorId, contentType }) {
+  const config = getMediaConfig();
+  if (!isMediaConfigured(config)) {
+    throw mediaNotConfigured();
+  }
+
+  const extension = ALLOWED_IMAGE_TYPES.get(contentType);
+  const key = `vendors/${vendorId}/products/${randomUUID()}.${extension}`;
+  const client = createS3Client(config);
   const command = new PutObjectCommand({
     Bucket: config.bucket,
     Key: key,

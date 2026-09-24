@@ -3,10 +3,41 @@ import express from "express";
 import { authenticateToken, authorize } from "../middleware/auth.js";
 import {
   createProductImageUpload,
+  deleteManagedProductImage,
   validateProductImage,
 } from "../services/mediaService.js";
 
 const router = express.Router();
+
+/**
+ * Best-effort cleanup of a previously referenced managed product image.
+ * Only objects proven to be SabiGet-managed and owned by `vendorId` are
+ * deleted; storage failures or missing config never fail the product update.
+ */
+async function cleanupPreviousManagedImage({
+  previousImageUrl,
+  vendorId,
+  productId,
+  operation,
+}) {
+  if (!previousImageUrl) return;
+  try {
+    const result = await deleteManagedProductImage({
+      imageUrl: previousImageUrl,
+      vendorId,
+    });
+    if (!result.deleted && result.reason === "not-configured") {
+      console.error(
+        `[Products] Media cleanup skipped after ${operation} for product ${productId} (storage not configured)`,
+      );
+    }
+  } catch (error) {
+    console.error(
+      `[Products] Media cleanup failed after ${operation} for product ${productId}:`,
+      error.message,
+    );
+  }
+}
 
 /**
  * GET /api/products
@@ -316,10 +347,27 @@ router.patch(
       }
       const updateData = parsed.data;
 
+      const previousImageUrl = existingProduct.imageUrl;
+      const imageReferenceChanged =
+        Object.prototype.hasOwnProperty.call(updateData, "imageUrl") &&
+        updateData.imageUrl !== previousImageUrl;
+
       const product = await global.prisma.Product.update({
         where: { id },
         data: updateData,
       });
+
+      // Clean up the previous object only after the new reference has been
+      // persisted, and only when the reference actually changed (replaced or
+      // explicitly removed).
+      if (imageReferenceChanged) {
+        await cleanupPreviousManagedImage({
+          previousImageUrl,
+          vendorId: vendor.id,
+          productId: id,
+          operation: "image-replaced-or-removed",
+        });
+      }
 
       res.json({ success: true, message: "Product updated", product });
     } catch (error) {
@@ -366,7 +414,16 @@ router.delete(
           });
       }
 
+      const previousImageUrl = existingProduct.imageUrl;
       await global.prisma.Product.delete({ where: { id } });
+
+      // Clean up the product's managed image object after deletion.
+      await cleanupPreviousManagedImage({
+        previousImageUrl,
+        vendorId: vendor.id,
+        productId: id,
+        operation: "product-deleted",
+      });
 
       res.json({ success: true, message: "Product deleted" });
     } catch (error) {

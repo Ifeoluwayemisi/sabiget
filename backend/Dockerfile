@@ -1,4 +1,7 @@
-FROM node:18-alpine
+# Debian-based image: Prisma's native engines require OpenSSL, which Alpine
+# (musl) images do not ship by default, causing "Could not parse schema engine
+# response" failures during generate/migrate. node:18-slim ships libssl3.
+FROM node:18-slim
 WORKDIR /app
 COPY package*.json ./
 # Install all dependencies so Prisma CLI is available in container

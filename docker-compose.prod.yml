@@ -30,6 +30,10 @@ services:
     image: sabiget-backend:prod
     env_file:
       - backend/.env
+    # MEDIA_* variables (MEDIA_BUCKET, MEDIA_REGION, MEDIA_ENDPOINT,
+    # MEDIA_ACCESS_KEY_ID, MEDIA_SECRET_ACCESS_KEY, MEDIA_PUBLIC_BASE_URL) are
+    # read from backend/.env through env_file above. When unset the backend
+    # fails closed with 503 MEDIA_NOT_CONFIGURED.
     ports:
       - "5000:5000"
     depends_on:
